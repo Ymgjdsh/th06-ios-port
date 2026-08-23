@@ -67,8 +67,7 @@ CLAUDE.md
 .vscode/
 blog/
 
-# AI prompts / agent instructions / workflow plans — never commit
-AGENTS.md
+# Private AI prompts and workflow plans
 AGENT.md
 GEMINI.md
 .github/copilot-instructions.md
