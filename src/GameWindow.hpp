@@ -1,0 +1,58 @@
+#pragma once
+
+#include "diffbuild.hpp"
+#include "inttypes.hpp"
+#include "sdl2_compat.hpp"
+#include <SDL.h>
+
+#define GAME_WINDOW_WIDTH 640
+#define GAME_WINDOW_HEIGHT 480
+
+namespace th06
+{
+enum RenderResult
+{
+    RENDER_RESULT_KEEP_RUNNING = 0,
+    RENDER_RESULT_EXIT_SUCCESS = 1,
+    RENDER_RESULT_EXIT_ERROR = -1,
+    RENDER_RESULT_RESTART = 2,
+};
+
+struct GameWindow
+{
+    RenderResult Render();
+    static void Present();
+
+    static i32 InitD3dInterface();
+    static void CreateGameWindow(void *unused);
+    static i32 InitD3dRendering();
+    static void InitD3dDevice();
+
+    SDL_Window *sdlWindow;
+    i32 isAppClosing;
+    i32 lastActiveAppValue;
+    i32 isAppActive;
+    u8 curFrame;
+    i32 screenSaveActive;
+    i32 lowPowerActive;
+    i32 powerOffActive;
+    i32 screenWidth;
+    i32 screenHeight;
+};
+
+void GameWindow_ProcessEvents();
+
+// iPhone portrait gameplay uses a dedicated presentation layout while the
+// game continues to render its original 640x480 scene internally.
+bool IsMobilePortraitGameplayLayout();
+i32 GetMobilePortraitHeaderHeight(i32 screenWidth, i32 screenHeight);
+
+DIFFABLE_EXTERN(GameWindow, g_GameWindow)
+DIFFABLE_EXTERN(i32, g_TickCountToEffectiveFramerate)
+DIFFABLE_EXTERN(double, g_LastFrameTime)
+
+// Android soft-keyboard (IME) inset, in physical pixels of the SurfaceView's
+// bottom edge that is currently obscured. 0 when no IME is shown. Updated by
+// GameWindow_ProcessEvents() from SDL_WINDOWEVENT_SIZE_CHANGED.
+extern int g_AndroidImeInsetPx;
+}; // namespace th06
