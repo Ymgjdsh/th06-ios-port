@@ -1,344 +1,185 @@
-# 東方紅魔郷 SDL2 移植版 / th06-sdl2
+# TH06 iOS Port
 
-> ⚠️ **归档通知 / Archived**
->
-> 由于作者精力有限,本项目进入归档期。作者不会持续维护这个项目,仅在有兴致时随缘处理。
->
-> Due to limited bandwidth, this project is now in archive mode. The author will no longer actively maintain it and will only touch it occasionally when the mood strikes.
+将《东方红魔乡 ～ the Embodiment of Scarlet Devil》移植到 iPhone 和 iPad 的非官方开源项目。
 
-**[English](#english)** | **[中文](#中文)**
+本项目基于社区重建的 TH06 源码和 SDL2 移植工作，重点维护 iOS 14+ 的原生 arm64 版本，并提供触控操作、竖屏布局、OpenGL ES 2.0 渲染和跨平台联机。它不是原作官方版本，也与上海爱丽丝幻乐团、ZUN 或 Apple 无关。
 
----
+> [!IMPORTANT]
+> 本项目的大部分新增、移植、联机和平台适配代码具有明显的 **vibe coding** 属性，主要由 AI/LLM 在开发者指导下生成或反复修改。代码能够编译、打包或在部分设备上运行，不等于它已经经过充分的人工设计审查、安全审计和跨设备测试。请把真机测试、双方日志和可复现步骤视为判断修复是否有效的必要证据。
 
-<a id="english"></a>
+## 当前状态
 
-## English
+- 当前 iOS 版本：`1.2.5 (20)`
+- 最低系统：iOS / iPadOS 14.0
+- 架构：arm64
+- 安装方式：使用 TrollStore 安装 ad-hoc 签名 IPA
+- 渲染后端：SDL2 + OpenGL ES 2.0
+- 已验证：完整源码可在 macOS 12.7.6、Xcode 14.0 和 iPhoneOS SDK 16.0 下构建并生成结构有效的 IPA
+- 尚未完成的验证：当前版本仍需要在真实设备上继续确认闪屏、画面割裂和联机整体卡顿问题
 
-### About
+构建成功只代表源码可以编译和打包，不代表所有运行问题已经解决。请在提交问题时附上设备型号、系统版本、联机方式和完整客机/主机日志。
 
-This is a cross-platform port of [Touhou Koumakyou ~ the Embodiment of Scarlet Devil (東方紅魔郷)](https://en.touhouwiki.net/wiki/Embodiment_of_Scarlet_Devil) v1.02h, built on top of the [community-reconstructed source code](https://github.com/happyhavoc/th06). Direct3D 8 and the Win32 window/audio stack have been replaced with **SDL2** and a set of pluggable renderers.
+## 主要功能
 
-### Rendering backends (runtime-selectable)
+- iPhone 和 iPad 原生运行，支持触控拖动、虚拟按键和菜单触控
+- 针对手机和平板的竖屏游戏区、计分区和 4:3 iPad 布局
+- GLES 2.0 渲染路径，支持游戏内 JPEG 画面和 PBG3 资源
+- SDL2_mixer 音频，打包 17 首 OGG BGM
+- 中文、英文和日文联机界面
+- 保存、配置和 Replay 写入独立的 iOS 应用数据目录
+- iOS 启动、资源、渲染、场景切换和崩溃诊断日志
+- 自动化 macOS 远程构建、IPA 校验、桌面交付和临时文件清理
 
-Three backends are compiled into the same executable. The active one is chosen by `--backend=...` on startup and clamped to whatever the device actually supports:
+## 联机方式
 
-| Backend | Source | Default on | Notes |
-|---|---|---|---|
-| **Desktop OpenGL (fixed-function)** | `src/sdl2_renderer.cpp` | Windows / Linux (x86) | Closest to the original D3D8 behaviour; the `NoGouraud`-style legacy flags only apply here |
-| **OpenGL ES 2.0 (shader)** | `src/RendererGLES.cpp` + `src/gles_shaders.h` | Android | Runs on any GLES2-capable GPU; used for the Android APK and for desktops without a working GL 2.1 |
-| **Vulkan 1.x** | `src/RendererVulkan.cpp` + `src/vulkan/` | opt-in | Loaded via [volk](https://github.com/zeux/volk), allocator via [VMA](https://gpuopen.com/vulkan-memory-allocator/); enabled at build time with `-DTH06_USE_VULKAN=ON` |
+| 模式 | iOS 与 iOS | iOS 与 Windows | 说明 |
+| --- | --- | --- | --- |
+| 附近局域网 | 支持 | 支持 | 设备连接同一 Wi-Fi，并使用相同房间端口 |
+| 直连地址 | 支持 | 支持 | 客机填写主机 IPv4 地址和相同端口 |
+| 中继房间 | 支持 | 支持 | 双方填写相同中继端点和房间码 |
+| 蓝牙附近设备 | 支持 | 不支持 | 使用 Apple MultipeerConnectivity，仅限 iOS 设备 |
 
-Pick one at runtime:
+局域网联机建议使用端口 `3037`。首次搜索时必须允许“本地网络”权限；如果曾拒绝，请到系统设置中重新启用。路由器需要允许无线客户端互相访问，访客 Wi-Fi 或开启 AP 隔离的网络无法正常发现对方。
 
-```
-th06.exe --backend=gl        # desktop fixed-function GL
-th06.exe --backend=gles      # GLES 2.0 shader path
-th06.exe --backend=vulkan    # Vulkan (requires TH06_USE_VULKAN build)
-```
+Windows 联机版由同一份源码构建：
 
-The thprac config window (**Extra config → Renderer**) exposes the same choice and persists it to `th06.cfg`. Backends not compiled in or not available on the device are hidden from the radio set.
-
-### Other features
-
-- **SDL2_mixer** for BGM/SE, **SDL2_image** for runtime textures (PNG/BMP)
-- **OGG BGM**, legacy WAV tree, and MIDI playback (through `SoundPlayer` / `MidiOutput`)
-- **Runtime text-encoding detection** so the same binary can read GBK (Chinese) and Shift-JIS (Japanese) game data without a rebuild
-- **thprac practice overlay** — stage select, practice tools, renderer/quality toggles, rendered with Dear ImGui
-- **Runtime i18n** (`src/i18n.tpl` + `scripts/gen_i18n.py` → `i18n.hpp`)
-- **PBG3 archive reader** in `src/pbg3/` for the original `.dat` files
-- **Authoritative-model netplay** in `src/Netplay*` (prediction/rollback path is gated behind `-DTH06_ENABLE_PREDICTION_ROLLBACK=ON`; off by default)
-- **Crash handler + watchdog** on both Windows (`CrashHandlerWin` / `WatchdogWin`) and POSIX
-- **Android port** with its own Gradle project (see below)
-- **CMake** build system with per-backend feature gates
-
-### Requirements
-
-- CMake ≥ 3.20
-- C++17 compiler: MSVC (Visual Studio 2022) on Windows, GCC 13+ or Clang on Linux
-- Python 3 for the `i18n.hpp` and encoding-table generators
-- **Game data files** from `東方紅魔郷.exe` v1.02h — see *Running*
-- *For the Vulkan backend:* LunarG Vulkan SDK (`VULKAN_SDK` env var) so CMake can locate headers and `glslangValidator`
-- *For Android:* Android SDK + NDK `21.4.7075529` and JDK 17
-
-The game file format and many structs assume `sizeof(void*) == 4`. Non-MSVC builds are therefore forced to `-m32`.
-
-### Building
-
-Windows (x86, default GL + GLES, no Vulkan):
-
-```
-cmake -B build_sdl2 -A Win32
-cmake --build build_sdl2 --config Release --target th06
+```text
+dist/th06-windows-netplay-win32/
+dist/th06-windows-netplay-win32.zip
 ```
 
-Windows (x86, GL + GLES + Vulkan):
+Windows Defender 弹出提示时，请允许 `th06.exe` 访问专用网络。
 
-```
-cmake -B build_vk -A Win32 -DTH06_USE_VULKAN=ON
-cmake --build build_vk --config Release --target th06
-```
+## 安装 IPA
 
-Linux (32-bit, GL + GLES):
+1. 在兼容设备上安装并打开 TrollStore。
+2. 导入本项目生成的 `.ipa`。
+3. 首次启动联机功能时，允许本地网络和蓝牙权限。
+4. 如果覆盖安装后出现异常，先保留 Replay 和存档，再记录日志后进行干净安装对比。
 
-```
-PKG_CONFIG_PATH=/usr/lib/i386-linux-gnu/pkgconfig \
-cmake -B build_linux_gles -DCMAKE_BUILD_TYPE=Release
-cmake --build build_linux_gles --target th06
-```
+仓库不提供 App Store 签名，也不需要 Apple Developer Team。应用 Bundle ID 为 `com.th06.sdl2.ios`。
 
-You will need the i386 dev packages: `sudo apt install gcc-multilib g++-multilib libsdl2-dev:i386 libsdl2-image-dev:i386 libsdl2-mixer-dev:i386 libgl-dev:i386`.
-
-Android (Gradle wrapper drives CMake via the NDK):
-
-```
-cd android
-./gradlew assembleRelease        # -> android/app/build/outputs/apk/release/app-release.apk
-```
-
-The APK only ships `armeabi-v7a` (for the `sizeof(void*) == 4` reason above). Set `TH06_STORE_PASSWORD` / `TH06_KEY_PASSWORD` env vars before building if you replace the bundled debug keystore.
-
-### Running
-
-The game needs access to the original data files (`th06*_CM.DAT`, `...`_IN.DAT`, `..._MD.DAT`, `..._ST.DAT`, etc.) and optional OGG BGM under `BGM/`. Place them alongside the executable or run the executable from the data directory:
-
-```
-cd <path-to-game-data>
-<path-to>/build_sdl2/Release/th06.exe --backend=gl
-```
-
-The Android build bundles the DAT files + OGG BGM into the APK (`android/app/src/main/assets/`); the `syncGameAssets` Gradle task copies them from the Windows build directory before packaging.
-
-### Project layout
-
-```
-CMakeLists.txt              # top-level build (th06 + vk_smoketest + th06_sdl2_test)
-3rdparty/
-  SDL2/ SDL2_image/ SDL2_mixer/   # Windows prebuilts; Linux uses pkg-config
-  imgui/                          # thprac overlay + ImGui GL2/GL3/Vulkan backends
-  volk/  Vulkan/                  # Vulkan loader + headers/VMA
-  Detours/ rapidjson/ zstd/ munit/
-src/
-  main.cpp                  # CLI parse, backend selection, restart loop
-  sdl2_renderer.cpp         # Desktop OpenGL backend (IRenderer impl)
-  RendererGLES.cpp          # OpenGL ES 2.0 backend (FBO-based fullscreen scaler)
-  gles_shaders.h            # Embedded GLSL ES shader source
-  RendererVulkan.cpp        # Vulkan backend (IRenderer impl)
-  vulkan/                   # VkContext / VkSwapchain / VkFrameContext /
-                            # VkRenderTarget / VkPipelineCache / VkResources /
-                            # VkTextureManager / VmaUsage
-  IRenderer.hpp             # Backend abstraction + runtime selection glue
-  BackendAvailability.cpp   # Probe / ResolveBackend / PlatformDefaultBackend
-  GameWindow.cpp            # SDL2 window, frame timing, renderer switch
-  SoundPlayer.cpp           # BGM/SE via SDL2_mixer
-  MidiOutput.cpp            # MIDI route
-  TextHelper.cpp            # stb_truetype + runtime GBK/Shift-JIS detection
-  AnmManager, BulletManager, EnemyManager, Player, Stage,
-  EclManager, GameManager, Supervisor, ScreenEffect, ...
-                            # game logic ported from the D3D8 reconstruction
-  Netplay*                  # authoritative-model netplay + (optional) rollback
-  thprac_*                  # practice-mode overlay (ImGui)
-  pbg3/                     # PBG3 archive reader
-  CrashHandlerWin/Posix, WatchdogWin/Posix
-  AndroidTouchInput, TouchVirtualButtons, MenuTouchButtons
-shaders_vk/                 # GLSL sources for the Vulkan backend (glslangValidator)
-android/                    # Android Gradle project (SDL2 Java glue + JNI CMake)
-  app/src/main/java/com/th06/game/   # CompatTouchOverlay, GamePerformanceService,
-                                     # SessionLogCollector (Android-specific
-                                     # quality-of-life work; applicationId is
-                                     # tianqi233.th06.game)
-scripts/                    # gen_i18n.py, gen_encoding_tables.py, Ghidra export,
-                            # decomp/objdiff pipeline helpers
-config/                     # decomp mapping data (mapping.csv, globals.csv, ...)
-tools/                      # vk_smoketest (Vulkan gating harness) + relay_service
-tests/                      # minimal munit-based tests (PBG3)
-```
-
-### Platform notes
-
-- **Android — tested on Mali GPUs after #5**: fragment shaders have no default `int` precision in GLSL ES 1.00, so the GLES preamble injects `precision highp float; precision highp int;` from `CompileShader` to keep VS/FS uniform precision matching on strict drivers (Mali-G51 etc.). `gles_shaders.h` is kept source-clean so desktop GL is unaffected.
-- **Android — vivo OriginOS "PEM" freezing**: the app declares a `FOREGROUND_SERVICE_SPECIAL_USE` service (`GamePerformanceService`) plus a persistent notification to stop the OS from cgroup-freezing the process while it is supposed to be interactive.
-- **Android — touch dispatch on Android 12+**: a `CompatTouchOverlay` sits on top of the SDL surface to bypass BLAST-pipeline input-throttling and recover dropped historical events.
-- **Windows x86 Release**: core gameplay translation units are built with `/arch:IA32 /fp:strict /Ob1 /Oy- /Od` to stay close to the original VC7 codegen so stock replays / demos stay bit-for-bit compatible.
-
-### Credits
-
-- [happyhavoc/th06](https://github.com/happyhavoc/th06) — reverse-engineered baseline source
-- [Team Shanghai Alice](https://www16.big.or.jp/~zun/) / ZUN — original game
-- [SDL2](https://www.libsdl.org/), [Vulkan](https://www.khronos.org/vulkan/), [Dear ImGui](https://github.com/ocornut/imgui), [volk](https://github.com/zeux/volk), [VMA](https://gpuopen.com/vulkan-memory-allocator/), [zstd](https://facebook.github.io/zstd/), [rapidjson](https://rapidjson.org/)
-
-### ⚠️ Developer Disclaimer (A Note on this Project's "Silicon Content")
-
-> **TL;DR:** Yes, this project is 100% **vibe-coded**!
->
-> Confession time: A significant portion of the underlying code in this repo was generated with the help of LLMs. If you're scrolling through the commit history and catch a strong whiff of "AI," trust your instincts — your radar is spot on.
->
-> My primary goal was straightforward: **achieve cross-platform compatibility** and get the game running smoothly with **full hardware-accelerated rendering on modern machines**, finally breaking free from the ancient shackles of D3D8. To quickly validate this idea and hit that goal, I happily outsourced all the tedious C++ grunt work, API swapping, and low-level duct-taping to my AI assistant.
->
-> The core philosophy here is simple: "The code might look a bit abstract, but hey, it actually runs on modern hardware." 🛠️
-
----
-
-<a id="中文"></a>
-
-## 中文
-
-### 项目简介
-
-本仓库是 [東方紅魔郷 ～ the Embodiment of Scarlet Devil](https://en.touhouwiki.net/wiki/Embodiment_of_Scarlet_Devil) v1.02h 的跨平台移植,基于社区 [逆向重建的源代码](https://github.com/happyhavoc/th06)。Direct3D 8 和 Win32 的窗口/音频栈被替换成了 **SDL2** 以及一组可切换的渲染后端。
-
-### 渲染后端(运行时可切换)
-
-三种后端都编进同一份可执行文件,启动时用 `--backend=...` 选择,实际使用的后端会被 "device 支持性检测" 再夹紧一次:
-
-| 后端 | 源码 | 默认平台 | 备注 |
-|---|---|---|---|
-| **Desktop OpenGL(固定管线)** | `src/sdl2_renderer.cpp` | Windows / Linux(x86) | 行为最接近原版 D3D8;`NoGouraud` 等遗留选项仅在该路径生效 |
-| **OpenGL ES 2.0(Shader)** | `src/RendererGLES.cpp` + `src/gles_shaders.h` | Android | 覆盖所有 GLES2 设备;Android APK 与桌面端 GL 2.1 不可用时走这一条 |
-| **Vulkan 1.x** | `src/RendererVulkan.cpp` + `src/vulkan/` | 可选 | 通过 [volk](https://github.com/zeux/volk) 运行期加载,分配器使用 [VMA](https://gpuopen.com/vulkan-memory-allocator/);需 `-DTH06_USE_VULKAN=ON` |
-
-运行时选择:
-
-```
-th06.exe --backend=gl        # 桌面固定管线 GL
-th06.exe --backend=gles      # GLES 2.0 Shader 路径
-th06.exe --backend=vulkan    # Vulkan(需 TH06_USE_VULKAN 构建)
-```
-
-thprac 的扩展配置面板(**扩展配置 → 渲染器**)也能切换,并写回 `th06.cfg`。当前设备/构建不可用的后端会从单选按钮里自动隐藏。
-
-### 其他特性
-
-- **SDL2_mixer** 负责 BGM/SE;**SDL2_image** 负责运行期纹理加载(PNG/BMP)
-- 支持 **OGG BGM**、旧版 WAV 目录和 **MIDI**(`SoundPlayer` / `MidiOutput`)
-- **运行时编码检测**:同一份二进制可直接读取 GBK(中文版)与 Shift-JIS(日文版)的游戏数据,无需重新编译
-- **thprac 练习模式覆盖层**:关卡选择、练习工具、渲染/画质选项,使用 Dear ImGui 渲染
-- **运行时 i18n**:`src/i18n.tpl` + `scripts/gen_i18n.py` 生成 `i18n.hpp`
-- **PBG3 归档解析器** 位于 `src/pbg3/`,用于读取原版 `.dat`
-- **权威模型联机** 位于 `src/Netplay*`,预测回滚路径由 `-DTH06_ENABLE_PREDICTION_ROLLBACK=ON` 开启,默认关闭
-- **崩溃处理 + Watchdog**:Windows(`CrashHandlerWin` / `WatchdogWin`)与 POSIX 两套实现
-- **Android 移植**:独立 Gradle 工程(详见下文)
-- **CMake** 构建系统,按后端分别开关
+## 在 macOS 上构建
 
 ### 环境要求
 
-- CMake ≥ 3.20
-- C++17 编译器:Windows 下 MSVC(Visual Studio 2022),Linux 下 GCC 13+ 或 Clang
-- Python 3(用于生成 `i18n.hpp` 与编码表)
-- **原版 `東方紅魔郷.exe` v1.02h 的游戏数据文件** — 见下文"运行"
-- *启用 Vulkan 后端:* LunarG Vulkan SDK(设置 `VULKAN_SDK` 环境变量),CMake 需要 headers 和 `glslangValidator`
-- *Android:* Android SDK + NDK `21.4.7075529` + JDK 17
+- macOS 与 Xcode 14 或更高版本
+- CMake 3.20 或更高版本
+- Python 3
+- 可合法使用的 TH06 游戏数据和 OGG BGM
 
-游戏文件格式与大量结构体假设 `sizeof(void*) == 4`,所以 GCC/Clang 路径会强制 `-m32`。
+项目默认从 `ios/assets` 和 `ios/bgm` 暂存资源。也可以通过 `ASSET_DIR`、`ASSET_APK` 和 `BGM_DIR` 指定其他资源位置。
 
-### 构建
-
-Windows(x86,默认 GL + GLES,不带 Vulkan):
-
-```
-cmake -B build_sdl2 -A Win32
-cmake --build build_sdl2 --config Release --target th06
+```sh
+chmod +x ios/build_ios.sh ios/package_ipa.sh
+./ios/build_ios.sh
 ```
 
-Windows(x86,GL + GLES + Vulkan):
+默认产物：
 
-```
-cmake -B build_vk -A Win32 -DTH06_USE_VULKAN=ON
-cmake --build build_vk --config Release --target th06
-```
-
-Linux(32 位,GL + GLES):
-
-```
-PKG_CONFIG_PATH=/usr/lib/i386-linux-gnu/pkgconfig \
-cmake -B build_linux_gles -DCMAKE_BUILD_TYPE=Release
-cmake --build build_linux_gles --target th06
+```text
+build-ios/th06-ios-1.2.5-20.ipa
 ```
 
-需先装好 i386 dev 包:`sudo apt install gcc-multilib g++-multilib libsdl2-dev:i386 libsdl2-image-dev:i386 libsdl2-mixer-dev:i386 libgl-dev:i386`。
+构建流程会执行源码预检、干净构建、资源完整性检查、版本检查、Bonjour/蓝牙权限声明检查、ad-hoc 签名和 IPA 打包。Release 构建默认删除旧的 `build-ios`，避免陈旧对象或资源混入新包。
 
-Android(Gradle wrapper 会通过 NDK 驱动 CMake):
+## 从 Windows 自动构建 IPA
 
-```
-cd android
-./gradlew assembleRelease        # 产物:android/app/build/outputs/apk/release/app-release.apk
-```
+仓库提供 SSH 远程构建脚本，可将完整源码快照上传到 Mac，在 Mac 上构建和验证 IPA，然后放到 Mac 桌面：
 
-APK 仅包含 `armeabi-v7a`(同前面那个 `sizeof(void*) == 4` 的原因)。如果要替换内置的 debug keystore,构建前设置 `TH06_STORE_PASSWORD` / `TH06_KEY_PASSWORD` 环境变量即可。
-
-### 运行
-
-游戏需要访问原版数据文件(`th06*_CM.DAT`、`..._IN.DAT`、`..._MD.DAT`、`..._ST.DAT` 等)以及 `BGM/` 下可选的 OGG 音乐。把它们放在可执行文件旁边,或者直接从游戏数据目录启动:
-
-```
-cd <游戏数据路径>
-<路径>/build_sdl2/Release/th06.exe --backend=gl
+```powershell
+powershell -ExecutionPolicy Bypass -File .\ios\build_on_mac.ps1 `
+  -MacHost 10.0.0.142 `
+  -MacUser dick `
+  -IosVersion 1.2.5 `
+  -IosBuild 20
 ```
 
-Android 构建会把 DAT + OGG BGM 一起打进 APK 的 `android/app/src/main/assets/`;Gradle 里的 `syncGameAssets` 任务会在打包前从 Windows 构建目录同步这些资源。
+脚本成功或失败后都会清理 Mac 上对应的临时源码包和构建目录。成功产物名称包含 Git 短提交号，例如：
 
-### 项目结构
-
-```
-CMakeLists.txt              # 顶层构建(th06 + vk_smoketest + th06_sdl2_test)
-3rdparty/
-  SDL2/ SDL2_image/ SDL2_mixer/   # Windows 内置预编译库;Linux 走 pkg-config
-  imgui/                          # thprac 覆盖层 + ImGui GL2/GL3/Vulkan 后端
-  volk/  Vulkan/                  # Vulkan 加载器 + headers/VMA
-  Detours/ rapidjson/ zstd/ munit/
-src/
-  main.cpp                  # CLI 解析、后端选择、重启循环
-  sdl2_renderer.cpp         # Desktop OpenGL 后端(IRenderer 实现)
-  RendererGLES.cpp          # OpenGL ES 2.0 后端(基于 FBO 的全屏缩放)
-  gles_shaders.h            # 内嵌 GLSL ES shader 源
-  RendererVulkan.cpp        # Vulkan 后端(IRenderer 实现)
-  vulkan/                   # VkContext / VkSwapchain / VkFrameContext /
-                            # VkRenderTarget / VkPipelineCache / VkResources /
-                            # VkTextureManager / VmaUsage
-  IRenderer.hpp             # 后端抽象 + 运行时选择
-  BackendAvailability.cpp   # Probe / ResolveBackend / PlatformDefaultBackend
-  GameWindow.cpp            # SDL2 窗口、帧计时、渲染器切换
-  SoundPlayer.cpp           # SDL2_mixer 做 BGM/SE
-  MidiOutput.cpp            # MIDI 路径
-  TextHelper.cpp            # stb_truetype + 运行时 GBK/Shift-JIS 检测
-  AnmManager, BulletManager, EnemyManager, Player, Stage,
-  EclManager, GameManager, Supervisor, ScreenEffect, ...
-                            # 从 D3D8 逆向版移植过来的游戏逻辑
-  Netplay*                  # 权威模型联机 +(可选)回滚
-  thprac_*                  # 练习模式覆盖层(ImGui)
-  pbg3/                     # PBG3 归档解析
-  CrashHandlerWin/Posix, WatchdogWin/Posix
-  AndroidTouchInput, TouchVirtualButtons, MenuTouchButtons
-shaders_vk/                 # Vulkan 后端的 GLSL 源(glslangValidator 编译)
-android/                    # Android Gradle 工程(SDL2 Java 胶水 + JNI CMake)
-  app/src/main/java/com/th06/game/   # CompatTouchOverlay、GamePerformanceService、
-                                     # SessionLogCollector 等 Android 端稳定性代码
-                                     # (applicationId = tianqi233.th06.game)
-scripts/                    # gen_i18n.py、gen_encoding_tables.py、Ghidra 导出脚本、
-                            # 反编译/objdiff 流水线辅助
-config/                     # 反编译映射数据(mapping.csv、globals.csv 等)
-tools/                      # vk_smoketest(Vulkan Gate 用的独立测试)+ relay_service
-tests/                      # 基于 munit 的最小测试(PBG3)
+```text
+~/Desktop/th06-ios-1.2.5-20-813e2aa.ipa
 ```
 
-### 平台小贴士
+提交号比重复使用的应用版本号更可靠。定位回归时，请同时记录完整 Git commit 和唯一 tag，不要只记录 `1.2.5 (20)`。
 
-- **Android — 针对 Mali GPU 的 #5 修复**:GLSL ES 1.00 的片段着色器 `int` 没有默认精度,`CompileShader` 里统一在 VS/FS 前注入 `precision highp float; precision highp int;` 前缀,让 Mali-G51 之类严格派驱动认可 uniform 精度匹配。`gles_shaders.h` 保持不改,桌面 GL 路径不受影响。
-- **Android — 对抗 vivo OriginOS 的 PEM 冻结**:AndroidManifest 声明了 `FOREGROUND_SERVICE_SPECIAL_USE` 前台服务(`GamePerformanceService`)+ 常驻通知,阻止系统在交互中途把进程放进 `/background` cgroup。
-- **Android — Android 12+ 触控**:在 SDL surface 上叠了一层 `CompatTouchOverlay`,用于绕过 BLAST 渲染管线带来的输入节流,并补回被系统吞掉的 historical events。
-- **Windows x86 Release**:核心玩法 .cpp 用 `/arch:IA32 /fp:strict /Ob1 /Oy- /Od` 编译,尽量贴近原版 VC7 代码生成,让标准 replay / demo 保持位级兼容。
+## 构建 Windows 联机版
 
-### 致谢
+在安装 Visual Studio 2022 C++ 桌面工具和 CMake 的 Windows 电脑上运行：
 
-- [happyhavoc/th06](https://github.com/happyhavoc/th06) — 原始逆向重建源码
-- [上海爱丽丝幻乐团](https://www16.big.or.jp/~zun/) / ZUN — 原版游戏
-- [SDL2](https://www.libsdl.org/)、[Vulkan](https://www.khronos.org/vulkan/)、[Dear ImGui](https://github.com/ocornut/imgui)、[volk](https://github.com/zeux/volk)、[VMA](https://gpuopen.com/vulkan-memory-allocator/)、[zstd](https://facebook.github.io/zstd/)、[rapidjson](https://rapidjson.org/)
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\build_windows_netplay.ps1 `
+  -Architecture Win32 `
+  -Clean
+```
 
-### ⚠️ 开发者叠甲时间(关于本项目含硅量的声明)
+脚本会生成可运行目录和 ZIP，并将与当前 iOS 源码匹配的游戏程序、SDL 运行库、资源和联机说明放入包中。
 
-> **太长不看版:** 没错,这是一个纯正的 **Vibe-coded(凭感觉编程)** 项目!
->
-> 坦白局:本项目含有大量由 LLM 辅助生成的底层代码。如果你在翻看 commit 记录时闻到了一股浓浓的"AI 味",自信点,你的直觉非常准确。
->
-> 我的核心目的其实非常纯粹:**实现跨平台运行**,并让游戏在**现代机器上能顺利跑满硬件加速**,彻底摆脱古老的 D3D8 的束缚。为了快速达成这个目标,那些繁琐的 C++ 搬砖活儿、API 替换和底层缝合,就全权委托给 AI 助理了。
->
-> 主打一个"代码虽然抽象,但它在现代机器上真能跑"。🛠️
+## 日志与问题报告
+
+在 Mac 上打开“控制台”，选择已连接的 iPhone 或 iPad，将消息级别切换为“所有信息”，搜索 `th06` 后启动游戏。常用日志前缀包括：
+
+- `[IOS-BOOT]`：启动、版本和主循环状态
+- `[AssetProbe]`：游戏资源检查
+- `[RendererGLES]`：GLES 渲染、FBO 和画面呈现
+- `[netplay]`、`[netplay/discovery]`：联机、Bonjour 和数据传输
+- `[IOS-CRASH]`：原生崩溃信息
+
+报告闪屏、割裂或联机卡顿时，请至少提供：
+
+- 主机和客机各自的设备型号、iOS 版本与 Git commit
+- 使用的联机模式、房间端口、网络环境和主客机角色
+- 从进入联机菜单前到问题出现后的双方完整日志
+- 问题是否在单机模式出现，以及是否能稳定复现
+
+只有客机日志通常不足以判断网络同步问题；主机和客机同一时间段的日志才能区分渲染、帧调度、网络抖动与状态恢复问题。
+
+## 项目结构
+
+```text
+ios/                         iOS 工程配置、平台桥接、资源和构建脚本
+src/                         游戏逻辑、GLES 渲染、触控和联机实现
+scripts/build_windows_netplay.ps1
+                             Windows 联机版构建与打包
+scripts/publish_github_version.ps1
+                             完整源码提交、标签和 GitHub 发布检查
+tools/relay_service/         中继服务
+3rdparty/                    第三方依赖
+```
+
+更详细的 iOS 构建说明见 [`ios/README.md`](ios/README.md)。
+
+## 版本与源码保存
+
+Git 历史是项目唯一可信的源码版本记录。每个交付测试的版本应满足：
+
+1. 完整、可构建的源码已经提交并推送到 `origin/main`。
+2. 使用一个从未使用过的 annotated tag，禁止移动或覆盖旧标签。
+3. IPA、ZIP、日志、构建缓存、签名材料和私钥不进入 Git。
+4. 发布说明准确区分“编译通过”“IPA 校验通过”和“真机测试通过”。
+
+## Vibe Coding 声明
+
+这个项目不是传统方式下由稳定团队逐行设计、评审和维护的移植工程。大部分项目特有代码是在快速试验过程中由 AI/LLM 辅助完成，包括但不限于 iOS 平台适配、渲染修复、触控、联机、诊断和自动构建脚本。
+
+这意味着：
+
+- 代码中可能存在重复实现、脆弱假设、历史修补残留和缺少测试的路径。
+- 版本号、文件名和注释可能落后于真实行为，应以 Git commit、实际源码和运行证据为准。
+- AI 给出的“根因”或“已修复”结论不能代替可复现测试和日志证据。
+- 欢迎审查、重构和提交可验证的修复；报告问题时请尽量提供双方完整日志。
+
+我们不会隐瞒这种开发方式，也不会把一次成功编译包装成完整质量保证。
+
+## 致谢
+
+- [happyhavoc/th06](https://github.com/happyhavoc/th06)：TH06 社区逆向重建源码
+- th06-sdl2 及相关社区工作：SDL2 与跨平台移植基础
+- [SDL](https://www.libsdl.org/)：窗口、输入、音频与平台支持
+- 上海爱丽丝幻乐团 / ZUN：《东方红魔乡》原作及其全部游戏内容
+
+## 版权与免责声明
+
+本仓库是非官方的技术研究和移植项目。原作名称、角色、音乐、图像及其他游戏内容的权利归其各自权利人所有。请仅使用自己合法取得并有权使用的游戏数据；不要借助本项目传播未经授权的原作内容。
+
+源码授权信息见 [`LICENSE`](LICENSE)。第三方组件可能使用各自的许可证，请同时查看相应目录中的许可文件。本软件按现状提供，不保证适用于特定设备、系统或网络环境，使用前请自行备份存档和 Replay。
