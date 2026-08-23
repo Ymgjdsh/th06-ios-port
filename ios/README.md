@@ -19,6 +19,21 @@ chmod +x ios/build_ios.sh ios/package_ipa.sh
 ./ios/build_ios.sh
 ```
 
+Build from the Windows project directory and place the verified IPA on a
+remote Mac desktop:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\ios\build_on_mac.ps1 `
+  -MacHost 10.0.0.142 -MacUser dick -IosVersion 1.2.5 -IosBuild 20
+```
+
+The remote builder uses the `th07_mac` OpenSSH key by default, creates a
+unique temporary run directory under `~/th06-build`, validates the IPA, then
+atomically installs it as `~/Desktop/th06-ios-1.2.5-20-<commit>.ipa`. Source
+archives, Xcode/CMake build directories, and temporary extraction files are
+removed from the Mac after success or failure. A failed build leaves only
+diagnostic logs under the local `dist/mac-build` directory.
+
 `ASSET_APK`, `ASSET_DIR`, and `BGM_DIR` remain available as overrides when a
 different lawful game data set should be packaged.
 
