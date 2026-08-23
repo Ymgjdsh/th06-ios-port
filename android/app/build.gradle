@@ -1,0 +1,140 @@
+apply plugin: 'com.android.application'
+
+android {
+    namespace "com.th06.game"
+    compileSdkVersion 34
+    ndkVersion "21.4.7075529"
+
+    signingConfigs {
+        release {
+            storeFile file('../../android/th06-debug.keystore')
+            storePassword System.getenv("TH06_STORE_PASSWORD") ?: ''
+            keyAlias 'th06'
+            keyPassword System.getenv("TH06_KEY_PASSWORD") ?: ''
+        }
+    }
+
+    defaultConfig {
+        applicationId "tianqi233.th06.game"
+        minSdkVersion 23
+        targetSdkVersion 34
+        versionCode 1
+        versionName "1.0"
+        externalNativeBuild {
+            cmake {
+                arguments "-DANDROID_STL=c++_static", "-DCMAKE_BUILD_TYPE=RelWithDebInfo"
+                // armeabi-v7a only: game file format requires sizeof(void*)==4
+                abiFilters 'armeabi-v7a'
+            }
+        }
+    }
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            signingConfig signingConfigs.release
+            packagingOptions {
+                doNotStrip '**/*.so'
+            }
+        }
+    }
+    applicationVariants.all { variant ->
+        tasks["merge${variant.name.capitalize()}Assets"]
+            .dependsOn("externalNativeBuild${variant.name.capitalize()}")
+    }
+    sourceSets.main {
+        jniLibs.srcDir 'libs'
+        // Game assets will be placed in app/src/main/assets/
+        assets.srcDirs = ['src/main/assets']
+    }
+    externalNativeBuild {
+        cmake {
+            path 'jni/CMakeLists.txt'
+            version '3.18.1'
+        }
+    }
+    lint {
+        abortOnError false
+    }
+}
+
+// Sync game resources from Windows build directory to Android assets.
+// Run manually: ./gradlew syncGameAssets
+// Or it runs automatically before assembleRelease.
+task syncGameAssets {
+    def winBuildDir = file("${rootProject.projectDir}/../build_sdl2/Release")
+    def assetsDir = file('src/main/assets')
+    doLast {
+        if (!winBuildDir.exists()) {
+            logger.warn("Windows build dir not found: ${winBuildDir}")
+            return
+        }
+        // Sync DAT files (exclude score.dat — it's per-user save data,
+        // generated at runtime in the app's writable storage; bundling it
+        // would overwrite saves on every install/upgrade).
+        winBuildDir.listFiles()?.findAll {
+            (it.name.endsWith('.DAT') || it.name.endsWith('.dat')) &&
+                it.name.toLowerCase() != 'score.dat'
+        }?.each { datFile ->
+            copy { from datFile; into assetsDir }
+        }
+        // Also delete any stale score.dat that previous builds may have
+        // staged into assets/, so it doesn't end up packaged.
+        def staleScore = new File(assetsDir, 'score.dat')
+        if (staleScore.exists()) { staleScore.delete() }
+        // Sync BGM directory.
+        // Important:
+        //  1. Game code references the directory in lowercase ("bgm/..."),
+        //     and Android APK assets are case-sensitive — copying into "BGM/"
+        //     would silently fail to load on device.
+        //  2. We clean both old "bgm" and stale "BGM" subdirs first to avoid
+        //     packaging legacy WAV files (~664 MB) alongside the current OGGs.
+        def assetsBgmLower = new File(assetsDir, 'bgm')
+        def assetsBgmUpper = new File(assetsDir, 'BGM')
+        if (assetsBgmLower.exists()) { delete assetsBgmLower }
+        if (assetsBgmUpper.exists()) { delete assetsBgmUpper }
+        def bgmSrc = new File(winBuildDir, 'BGM')
+        if (bgmSrc.exists()) {
+            // Source tree contains a legacy 'wav/' sub-folder with the
+            // original ~700MB WAV BGM. The Android build only ships OGG, so
+            // exclude the wav/ subtree explicitly.
+            copy {
+                from bgmSrc
+                into assetsBgmLower
+                exclude 'wav/**', 'wav'
+            }
+        }
+        // Sync font: copy CONTENTS of font/ into assets/font/ (no nesting)
+        def fontSrc = new File(winBuildDir, 'font')
+        if (fontSrc.exists()) {
+            copy { from fontSrc; into new File(assetsDir, 'font') }
+        }
+        // Sync compiled SPIR-V shaders. We wipe the destination first so a
+        // shader that disappears from the source tree (rename, retire) does
+        // not linger in the APK, and so newly added shaders such as
+        // v_tex1_diffuse_xyz_clip.vert.spv actually end up packaged.
+        def assetsShaders = new File(assetsDir, 'shaders_vk')
+        if (assetsShaders.exists()) { delete assetsShaders }
+        def shadersSrc = new File(winBuildDir, 'shaders_vk')
+        if (shadersSrc.exists()) {
+            copy { from shadersSrc; into assetsShaders }
+        }
+    }
+}
+
+tasks.matching { it.name =~ /assemble.*Release/ }.configureEach {
+    dependsOn syncGameAssets
+}
+
+// syncGameAssets must run before any merge*Assets task, otherwise Gradle
+// packages a stale snapshot of app/src/main/assets/ (e.g. WAV BGM left over
+// from a previous OGG-conversion pass) into the APK alongside the fresh
+// files. mergeReleaseAssets drives the eventual APK contents, so wire the
+// dependency on every variant's merge task explicitly.
+tasks.matching { it.name =~ /merge.*Assets/ }.configureEach {
+    dependsOn syncGameAssets
+}
+
+dependencies {
+    implementation fileTree(include: ['*.jar'], dir: 'libs')
+}

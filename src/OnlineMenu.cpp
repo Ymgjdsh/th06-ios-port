@@ -1,0 +1,963 @@
+#include "OnlineMenu.hpp"
+
+#include "LocalNetworkPermissionIOS.hpp"
+#include "NetplaySession.hpp"
+#include "thprac_gui_locale.h"
+#include "../ios/BluetoothPeerTransport.hpp"
+
+#include <SDL.h>
+#include <imgui.h>
+
+#include <algorithm>
+#include <cctype>
+#include <cmath>
+#include <cstring>
+#include <cstdio>
+#include <cstdlib>
+#include <fstream>
+#include <string>
+
+namespace th06::OnlineMenu
+{
+namespace
+{
+constexpr int kDefaultPort = 3036;
+constexpr int kDefaultDelay = 2;
+// Three frames absorb normal Wi-Fi scheduling jitter. Local touch movement is
+// still presented immediately, so this does not add three frames to the local
+// player's visible control response.
+constexpr int kNearbyDelay = 3;
+constexpr float kFrameTimeMs = 1000.0f / 60.0f;
+
+struct State
+{
+    bool isOpen = false;
+    bool closeRequested = false;
+    bool configLoaded = false;
+    bool dirty = false;
+
+    // One user-facing room port is used by both peers. Keeping the old
+    // listenPort member internally lets older call sites/configs migrate
+    // without exposing two values in the launcher.
+    int hostPort = kDefaultPort;
+    int listenPort = kDefaultPort;
+    int targetDelay = kDefaultDelay;
+    bool authoritativeModeEnabled = false;
+    int mode = 0; // 0 nearby LAN, 1 direct address, 2 relay, 3 Bluetooth nearby
+    char hostIp[128] = "::1";
+    char relayServer[256] = "";
+    char relayRoom[64] = "";
+};
+
+State g_State;
+
+const char *Tr(const char *zh, const char *en, const char *ja)
+{
+    switch (THPrac::Gui::LocaleGet())
+    {
+    case THPrac::Gui::LOCALE_ZH_CN:
+        return zh;
+    case THPrac::Gui::LOCALE_JA_JP:
+        return ja;
+    case THPrac::Gui::LOCALE_EN_US:
+    default:
+        return en;
+    }
+}
+
+void ShowWrappedTooltip(const char *text, float wrapWidth = 320.0f)
+{
+    ImGui::BeginTooltip();
+    ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + wrapWidth);
+    ImGui::TextUnformatted(text);
+    ImGui::PopTextWrapPos();
+    ImGui::EndTooltip();
+}
+
+std::string GetLauncherTitle()
+{
+    return std::string(Tr("联机启动器", "Game Launcher", "ネットワーク起動")) + " [ver=3.9.0]";
+}
+
+const char *GetHostIpLabel() { return Tr("主机 IP:", "Host IP:", "ホスト IP:"); }
+const char *GetHostPortLabel() { return Tr("主机端口:", "Host Port:", "ホストポート:"); }
+const char *GetListenPortLabel() { return Tr("监听端口:", "Listen Port:", "待受ポート:"); }
+const char *GetLanHostPortLabel() { return Tr("房间端口:", "Room port:", "ルームポート:"); }
+const char *GetRelayServerLabel() { return Tr("中转服务器ip:", "Relay Server:", "中継サーバー:"); }
+const char *GetRelayConnectLabel() { return Tr("连接", "Connect", "接続"); }
+const char *GetRelayStatusLabel() { return Tr("中转状态", "Relay", "中継状態"); }
+const char *GetRelayRoomLabel() { return Tr("房间码:", "Room Code:", "ルームコード:"); }
+const char *GetRelayTooltip()
+{
+    return Tr("可填写 ip:端口、域名，或 [IPv6]:端口。点击连接后会持续探测并显示延迟。",
+              "Enter ip:port, a domain, or [IPv6]:port. After Connect, the launcher keeps probing and shows latency.",
+              "ip:port、ドメイン、または [IPv6]:port を入力できます。接続後は継続的に疎通確認し、遅延を表示します。");
+}
+const char *GetCurStateLabel() { return Tr("当前状态:", "cur state:", "現在の状態:"); }
+const char *GetTargetDelayLabel() { return Tr("目标延迟:", "target delay:", "目標遅延:"); }
+const char *GetAuthoritativeModeLabel()
+{
+    return Tr("Host 权威实验模式:", "Host authoritative (experimental):", "Host 権威実験モード:");
+}
+const char *GetAuthoritativeModeTooltip()
+{
+    return Tr("实验性模式。远程联机切到固定 2 帧输入缓冲、无 rollback 的权威链路，保留现有单机与 rollback 联机实现。",
+              "Experimental. Switch remote netplay to a fixed 2-frame authoritative path without rollback while keeping single-player and the current rollback mode intact.",
+              "実験的モードです。リモート対戦を固定 2 フレーム入力バッファの host 権威パスに切り替え、単機と既存のロールバック対戦は維持します。");
+}
+const char *GetAutoDelayLabel() { return Tr("自动", "Auto", "自動"); }
+const char *GetAutoDelayTooltip()
+{
+    return Tr("根据当前 RTT 的单程时间自动估算一次目标延迟，只会填入一次，不会持续改动。",
+              "Estimate target delay once from half of the current RTT. The value is not changed continuously.",
+              "現在の RTT の片道時間から目標遅延を一度だけ推定し、継続的には変更しません。");
+}
+const char *GetRttLabel() { return "RTT"; }
+const char *GetStartGameLabel() { return Tr("开始游戏", "Start Game", "ゲーム開始"); }
+const char *GetStartGameLocalLabel() { return Tr("本地开始", "Start Game(local)", "ローカル開始"); }
+const char *GetReturnTitleLabel() { return Tr("返回标题 (X)", "Return to title (X)", "タイトルに戻る (X)"); }
+const char *GetVersionMismatchWarning() { return Tr("警告：host/guest 版本不一致", "warning: host/guest version mismatch", "警告: host/guest のバージョンが一致しません"); }
+
+std::string LocalizeStatusText(const std::string &raw)
+{
+    if (raw == "no connection")
+    {
+        return Tr("未连接", "no connection", "未接続");
+    }
+    if (raw == "connected")
+    {
+        return Tr("已连接", "connected", "接続済み");
+    }
+    if (raw == "version mismatch")
+    {
+        return Tr("版本不一致", "version mismatch", "バージョン不一致");
+    }
+    if (raw.rfind("version mismatch", 0) == 0)
+    {
+        return std::string(Tr("版本不一致", "version mismatch", "バージョン不一致")) +
+               raw.substr(std::strlen("version mismatch"));
+    }
+    if (raw == "disconnected")
+    {
+        return Tr("已断开", "disconnected", "切断");
+    }
+    if (raw == "local game")
+    {
+        return Tr("本地游戏", "local game", "ローカルゲーム");
+    }
+    if (raw == "searching LAN...")
+    {
+        return Tr("正在搜索局域网...", "searching LAN...", "LAN を検索中...");
+    }
+    if (raw == "LAN host found")
+    {
+        return Tr("已找到局域网主机", "LAN host found", "LAN ホストを検出");
+    }
+    if (raw == "no LAN host found")
+    {
+        return Tr("未找到局域网主机", "no LAN host found", "LAN ホストが見つかりません");
+    }
+    if (raw == "local network permission denied")
+    {
+        return Tr("局域网权限被拒绝", "local network permission denied", "ローカルネットワーク権限が拒否されました");
+    }
+    if (raw == "waiting nearby guest...")
+    {
+        return Tr("等待附近客机...", "waiting for nearby guest...", "近くのゲストを待機中...");
+    }
+    if (raw == "searching nearby host...")
+    {
+        return Tr("正在搜索附近主机...", "searching for nearby host...", "近くのホストを検索中...");
+    }
+    if (raw == "Bluetooth start failed")
+    {
+        return Tr("附近设备启动失败", "nearby transport failed to start", "近接接続の起動に失敗しました");
+    }
+    if (raw == "Bluetooth is iOS only")
+    {
+        return Tr("蓝牙附近联机仅支持 iOS 设备", "Bluetooth nearby play is iOS-only", "Bluetooth 近接対戦は iOS のみ");
+    }
+    if (raw == "try to reconnect...(sync)")
+    {
+        return Tr("正在重连...(同步)", "try to reconnect...(sync)", "再接続中...(同期)");
+    }
+    if (raw == "try to reconnect...(desynced)")
+    {
+        return Tr("正在重连...(已不同步)", "try to reconnect...(desynced)", "再接続中...(非同期)");
+    }
+    if (raw == "fail to start as host")
+    {
+        return Tr("host 启动失败", "fail to start as host", "ホスト起動失敗");
+    }
+    if (raw == "waiting guest...")
+    {
+        return Tr("等待 guest...", "waiting guest...", "ゲスト待機中...");
+    }
+    if (raw == "rollback waiting...")
+    {
+        return Tr("等待回滚...", "rollback waiting...", "ロールバック待機中...");
+    }
+    if (raw == "guest listen port conflicts with host")
+    {
+        return Tr("guest 监听端口与 host 冲突", "guest listen port conflicts with host", "ゲストの待受ポートがホストと競合しています");
+    }
+    if (raw == "fail to start as guest")
+    {
+        return Tr("guest 启动失败", "fail to start as guest", "ゲスト起動失敗");
+    }
+    if (raw == "trying connection...")
+    {
+        return Tr("正在连接...", "trying connection...", "接続中...");
+    }
+    if (raw == "starting game...")
+    {
+        return Tr("正在开始游戏...", "starting game...", "ゲーム開始中...");
+    }
+    if (raw == "waiting relay guest...")
+    {
+        return Tr("等待中转 guest...", "waiting relay guest...", "中継 guest 待機中...");
+    }
+    if (raw == "waiting relay host...")
+    {
+        return Tr("等待中转 host...", "waiting relay host...", "中継 host 待機中...");
+    }
+    if (raw == "registering relay guest...")
+    {
+        return Tr("正在注册中转 guest...", "registering relay guest...", "中継 guest 登録中...");
+    }
+    if (raw == "relay register failed")
+    {
+        return Tr("中转注册失败", "relay register failed", "中継登録失敗");
+    }
+    if (raw == "relay room occupied")
+    {
+        return Tr("房间被占用", "room occupied", "ルーム使用中");
+    }
+    if (raw == "relay endpoint/room required")
+    {
+        return Tr("中转地址和房间码必须同时填写", "relay endpoint and room code are both required",
+                  "中継アドレスとルームコードは両方必要です");
+    }
+    if (raw == "invalid relay endpoint")
+    {
+        return Tr("中转地址格式无效", "invalid relay endpoint", "中継アドレス形式が無効です");
+    }
+    if (raw == "startup seed mismatch")
+    {
+        return Tr("启动种子不一致", "startup seed mismatch", "起動シード不一致");
+    }
+    if (raw == "resolving relay...")
+    {
+        return Tr("正在解析中转地址...", "resolving relay...", "中継アドレスを解決中...");
+    }
+    if (raw == "resolving host...")
+    {
+        return Tr("正在解析主机地址...", "resolving host...", "ホストアドレスを解決中...");
+    }
+    if (raw == "resolve relay failed")
+    {
+        return Tr("中转地址解析失败", "resolve relay failed", "中継アドレスの名前解決失敗");
+    }
+    if (raw == "resolve host failed")
+    {
+        return Tr("主机地址解析失败", "resolve host failed", "ホストアドレスの名前解決失敗");
+    }
+    return raw;
+}
+
+std::string LocalizeRelayStatusText(const std::string &raw)
+{
+    if (raw == "not configured")
+    {
+        return Tr("未配置", "not configured", "未設定");
+    }
+    if (raw == "invalid relay endpoint")
+    {
+        return Tr("地址格式无效", "invalid endpoint", "アドレス形式が無効です");
+    }
+    if (raw == "relay socket init failed")
+    {
+        return Tr("中转探测 socket 初始化失败", "relay socket init failed", "中継ソケット初期化失敗");
+    }
+    if (raw == "resolving relay...")
+    {
+        return Tr("正在解析中转地址...", "resolving relay...", "中継アドレスを解決中...");
+    }
+    if (raw == "resolve failed")
+    {
+        return Tr("域名解析失败", "resolve failed", "名前解決失敗");
+    }
+    if (raw.rfind("resolve failed:", 0) == 0)
+    {
+        return std::string(Tr("域名解析失败:", "resolve failed:", "名前解決失敗:")) +
+               raw.substr(std::strlen("resolve failed:"));
+    }
+    if (raw == "probe send failed")
+    {
+        return Tr("探测包发送失败", "probe send failed", "疎通確認パケット送信失敗");
+    }
+    if (raw == "probing...")
+    {
+        return Tr("正在探测...", "probing...", "疎通確認中...");
+    }
+    if (raw == "reachable")
+    {
+        return Tr("可达", "reachable", "到達可能");
+    }
+    if (raw == "probe timeout")
+    {
+        return Tr("探测超时", "probe timeout", "疎通確認タイムアウト");
+    }
+    if (raw == "probe socket error")
+    {
+        return Tr("中转探测 socket 错误", "probe socket error", "中継ソケットエラー");
+    }
+    return raw;
+}
+
+std::string Trim(std::string value)
+{
+    const auto isSpace = [](unsigned char ch) { return std::isspace(ch) != 0; };
+
+    while (!value.empty() && isSpace(static_cast<unsigned char>(value.front())))
+    {
+        value.erase(value.begin());
+    }
+    while (!value.empty() && isSpace(static_cast<unsigned char>(value.back())))
+    {
+        value.pop_back();
+    }
+    return value;
+}
+
+const char *GetConfigPath()
+{
+    static std::string path;
+    static bool initialized = false;
+    if (!initialized)
+    {
+        initialized = true;
+        if (char *prefPath = SDL_GetPrefPath("th06-sdl2", "netplay"))
+        {
+            path = prefPath;
+            SDL_free(prefPath);
+            if (!path.empty())
+            {
+                const char tail = path.back();
+                if (tail != '/' && tail != '\\')
+                {
+                    path.push_back('/');
+                }
+            }
+            path += "connect_config.ini";
+        }
+        else
+        {
+            path = "connect_config.ini";
+        }
+    }
+    return path.c_str();
+}
+
+void ClampState()
+{
+    g_State.hostPort = std::clamp(g_State.hostPort, 1, 65535);
+    g_State.listenPort = g_State.hostPort;
+    const int minimumDelay = (g_State.mode == 0 || g_State.mode == 3) ? kNearbyDelay : 1;
+    g_State.targetDelay = std::clamp(g_State.targetDelay, minimumDelay, 60);
+    g_State.mode = std::clamp(g_State.mode, 0, 3);
+}
+
+int EstimateDelayFromRttMs(int rttMs)
+{
+    if (rttMs < 0)
+    {
+        return kDefaultDelay;
+    }
+
+    const float oneWayMs = static_cast<float>(rttMs) * 0.5f;
+    const int estimated = static_cast<int>(std::ceil(oneWayMs / kFrameTimeMs));
+    return std::clamp(estimated, 1, 10);
+}
+
+void LoadConfig()
+{
+    if (g_State.configLoaded)
+    {
+        return;
+    }
+
+    g_State.configLoaded = true;
+
+    std::ifstream file(GetConfigPath());
+    if (!file)
+    {
+        ClampState();
+        Netplay::SetDelay(g_State.targetDelay);
+        Netplay::SetPredictionRollbackEnabled(false);
+        Netplay::SetAuthoritativeModeEnabled(g_State.authoritativeModeEnabled);
+        return;
+    }
+
+    bool inConnectionSection = false;
+    std::string line;
+    while (std::getline(file, line))
+    {
+        line = Trim(line);
+        if (line.empty() || line[0] == ';' || line[0] == '#')
+        {
+            continue;
+        }
+
+        if (line.front() == '[' && line.back() == ']')
+        {
+            inConnectionSection = Trim(line.substr(1, line.size() - 2)) == "Connection";
+            continue;
+        }
+
+        if (!inConnectionSection)
+        {
+            continue;
+        }
+
+        const std::size_t equalsPos = line.find('=');
+        if (equalsPos == std::string::npos)
+        {
+            continue;
+        }
+
+        const std::string key = Trim(line.substr(0, equalsPos));
+        const std::string value = Trim(line.substr(equalsPos + 1));
+
+        if (key == "ip")
+        {
+            std::snprintf(g_State.hostIp, sizeof(g_State.hostIp), "%s", value.c_str());
+        }
+        else if (key == "port" || key == "port_host")
+        {
+            g_State.hostPort = std::atoi(value.c_str());
+            g_State.listenPort = g_State.hostPort;
+        }
+        else if (key == "target_delay")
+        {
+            g_State.targetDelay = std::atoi(value.c_str());
+        }
+        else if (key == "authoritative_mode")
+        {
+            // Disabled for now. Keep parsing compatibility with older config files,
+            // but force fallback to the rollback netplay path.
+            g_State.authoritativeModeEnabled = false;
+        }
+        else if (key == "relay_server")
+        {
+            std::snprintf(g_State.relayServer, sizeof(g_State.relayServer), "%s", value.c_str());
+        }
+        else if (key == "relay_room")
+        {
+            std::snprintf(g_State.relayRoom, sizeof(g_State.relayRoom), "%s", value.c_str());
+        }
+        else if (key == "disable_netplay_displacement")
+        {
+            // Legacy builds could disable pixel displacement and turn touch
+            // dragging into coarse direction-key movement. Keep old configs
+            // readable, but always use the single-player touch path now.
+        }
+        else if (key == "mode")
+        {
+            g_State.mode = std::atoi(value.c_str());
+        }
+    }
+
+    ClampState();
+    Netplay::SetDelay(g_State.targetDelay);
+    Netplay::SetPredictionRollbackEnabled(false);
+    g_State.authoritativeModeEnabled = false;
+    Netplay::SetAuthoritativeModeEnabled(false);
+}
+
+void SaveConfig()
+{
+    if (!g_State.configLoaded)
+    {
+        return;
+    }
+
+    ClampState();
+
+    std::ofstream file(GetConfigPath(), std::ios::trunc);
+    if (!file)
+    {
+        return;
+    }
+
+    file << "[Connection]\n";
+    file << "ip=" << g_State.hostIp << '\n';
+    file << "port=" << g_State.hostPort << '\n';
+    file << "target_delay=" << g_State.targetDelay << '\n';
+    // Disabled for now. Persist 0 so older experimental installs fall back to rollback netplay.
+    file << "authoritative_mode=0\n";
+    file << "relay_server=" << g_State.relayServer << '\n';
+    file << "relay_room=" << g_State.relayRoom << '\n';
+    file << "disable_netplay_displacement=0\n";
+    file << "mode=" << g_State.mode << '\n';
+}
+
+const char *GetHostButtonLabel(const Netplay::Snapshot &snapshot)
+{
+    if (snapshot.isHost && snapshot.isConnected)
+    {
+        return Tr("已连接", "connected", "接続済み");
+    }
+    if (snapshot.isHost)
+    {
+        return Tr("等待 guest", "waiting guest", "guest 待機");
+    }
+    return Tr("作为 host", "as host", "host として");
+}
+
+const char *GetGuestButtonLabel(const Netplay::Snapshot &snapshot)
+{
+    if (snapshot.isGuest && snapshot.isConnected)
+    {
+        return Tr("已连接", "connected", "接続済み");
+    }
+    if (snapshot.isGuest)
+    {
+        return Tr("等待消息...", "waiting msg...", "メッセージ待機...");
+    }
+    return Tr("作为 guest", "as guest", "guest として");
+}
+
+const char *GetLanDiscoveryLabel()
+{
+    return Tr("搜索并加入局域网", "Search & join LAN", "LAN を検索して参加");
+}
+
+const char *GetLanDiscoverySearchingLabel()
+{
+    return Tr("正在搜索局域网...", "Searching LAN...", "LAN を検索中...");
+}
+
+const char *GetModeNearbyLabel() { return Tr("附近局域网", "Nearby LAN", "近くの LAN"); }
+const char *GetModeDirectLabel() { return Tr("直接地址", "Direct address", "直接アドレス"); }
+const char *GetModeRelayLabel() { return Tr("中转房间", "Relay room", "中継ルーム"); }
+const char *GetModeBluetoothLabel() { return Tr("蓝牙附近设备", "Bluetooth nearby", "Bluetooth 近接"); }
+const char *GetBluetoothHostLabel() { return Tr("创建附近房间", "Create nearby room", "近くの部屋を作成"); }
+const char *GetBluetoothGuestLabel() { return Tr("加入附近房间", "Join nearby room", "近くの部屋に参加"); }
+const char *GetLanHostLabel() { return Tr("创建局域网房间", "Create LAN room", "LAN ルームを作成"); }
+const char *GetLanGuestLabel() { return Tr("搜索并加入局域网", "Search and join LAN", "LAN を検索して参加"); }
+const char *GetBluetoothUnavailableLabel() { return Tr("蓝牙附近联机仅支持 iOS 设备", "Bluetooth nearby play is iOS-only", "Bluetooth 近接対戦は iOS のみ"); }
+} // namespace
+
+std::string LocalizeNetplayStatusText(const std::string &raw)
+{
+    return LocalizeStatusText(raw);
+}
+
+std::string LocalizeRelayProbeStatusText(const std::string &raw)
+{
+    return LocalizeRelayStatusText(raw);
+}
+
+bool IsNetplayDisplacementDisabled()
+{
+    return false;
+}
+
+void Open()
+{
+    LoadConfig();
+    g_State.isOpen = true;
+    g_State.closeRequested = false;
+    // Start iOS local-network authorization while the launcher is visible so
+    // a later LAN-search tap never races the Bonjour permission request.
+    TH06_IOS_TriggerLocalNetworkPermission();
+    SDL_LogCritical(SDL_LOG_CATEGORY_APPLICATION,
+                    "[OnlineMenu] opened netplay-ui=3.9.0 modes=4 window=450x460");
+}
+
+void Close()
+{
+    SaveConfig();
+    Netplay::CancelLanDiscovery();
+    Netplay::ClearRelayProbe();
+    g_State.isOpen = false;
+    g_State.closeRequested = false;
+    if (!Netplay::IsSessionActive() && !Netplay::IsWaitingForStartup())
+    {
+        Netplay::CancelPendingConnection();
+    }
+}
+
+void Reset()
+{
+    g_State = State {};
+}
+
+bool IsOpen()
+{
+    return g_State.isOpen;
+}
+
+bool ShouldForceRunInBackground()
+{
+    const SessionKind kind = Session::GetKind();
+    return g_State.isOpen || Netplay::IsWaitingForStartup() || Netplay::IsSessionActive() ||
+           kind == SessionKind::LocalNetplay || kind == SessionKind::Netplay ||
+           kind == SessionKind::NetplayAuthoritative;
+}
+
+bool ConsumeCloseRequested()
+{
+    if (!g_State.closeRequested)
+    {
+        return false;
+    }
+
+    Close();
+    return true;
+}
+
+bool AllowsBackShortcut()
+{
+    if (!ImGui::GetCurrentContext())
+    {
+        return true;
+    }
+
+    const ImGuiIO &io = ImGui::GetIO();
+    return !io.WantTextInput && !ImGui::IsAnyItemActive();
+}
+
+void UpdateImGui()
+{
+    if (!g_State.isOpen || !ImGui::GetCurrentContext())
+    {
+        return;
+    }
+
+    ClampState();
+
+    Netplay::LanDiscoveryResult discoveryResult;
+    if (Netplay::ConsumeLanDiscoveryResult(discoveryResult))
+    {
+        std::strncpy(g_State.hostIp, discoveryResult.hostIp.c_str(), sizeof(g_State.hostIp) - 1);
+        g_State.hostIp[sizeof(g_State.hostIp) - 1] = '\0';
+        g_State.hostPort = discoveryResult.hostPort;
+        g_State.dirty = true;
+        std::string error;
+        if (!Netplay::BeginGuest(g_State.hostIp, g_State.hostPort, g_State.hostPort,
+                                 "", "", &error))
+        {
+            SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "LAN discovery auto-join failed: %s", error.c_str());
+        }
+        else
+        {
+            SDL_Log("LAN discovery auto-joined host %s:%d", g_State.hostIp, g_State.hostPort);
+        }
+    }
+    Netplay::TickLauncher();
+    if (Netplay::ConsumeLauncherCloseRequested())
+    {
+        g_State.closeRequested = true;
+    }
+
+    const Netplay::Snapshot snapshot = Netplay::GetSnapshot();
+    const Netplay::RelaySnapshot relaySnapshot = Netplay::GetRelaySnapshot();
+    const bool nearbyTransport = g_State.mode == 0 || g_State.mode == 3;
+    g_State.targetDelay = nearbyTransport ? std::max(snapshot.targetDelay, kNearbyDelay) : snapshot.targetDelay;
+    if (nearbyTransport && snapshot.targetDelay < kNearbyDelay)
+    {
+        // Migrate old installs that persisted the former one-frame setting.
+        Netplay::SetDelay(kNearbyDelay);
+        g_State.dirty = true;
+    }
+    g_State.authoritativeModeEnabled = false;
+    const std::string launcherTitle = GetLauncherTitle();
+    const std::string localizedStatusText = LocalizeStatusText(snapshot.statusText);
+    const std::string localizedRelayStatusText = LocalizeRelayStatusText(relaySnapshot.statusText);
+
+    // The renderer UI canvas is 640x480. Taller windows put their first
+    // controls above y=0 and made the LAN search button invisible.
+    ImGui::SetNextWindowSize(ImVec2(450.0f, 460.0f), ImGuiCond_Appearing);
+    ImGui::SetNextWindowPos(ImVec2(320.0f, 240.0f), ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+
+    bool keepOpen = true;
+    const ImGuiWindowFlags flags = ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoSavedSettings;
+    if (!ImGui::Begin(launcherTitle.c_str(), &keepOpen, flags))
+    {
+        ImGui::End();
+        if (!keepOpen)
+        {
+            g_State.closeRequested = true;
+        }
+        return;
+    }
+
+    // The launcher is organized around the user's decision: pick a transport,
+    // choose host or join, then adjust the optional network settings.
+    ImGui::TextUnformatted(Tr("联机方式", "Connection method", "接続方式"));
+    ImGui::Separator();
+    if (ImGui::BeginTable("##online_modes", 2, ImGuiTableFlags_SizingStretchProp))
+    {
+        const char *labels[] = {GetModeNearbyLabel(), GetModeDirectLabel(), GetModeRelayLabel(), GetModeBluetoothLabel()};
+        for (int i = 0; i < 4; ++i)
+        {
+            ImGui::TableNextColumn();
+            if (ImGui::Selectable(labels[i], g_State.mode == i, ImGuiSelectableFlags_DontClosePopups,
+                                  ImVec2(0.0f, 34.0f)))
+            {
+                g_State.mode = i;
+                if (i == 0 || i == 3)
+                {
+                    g_State.targetDelay = kNearbyDelay;
+                    Netplay::SetDelay(kNearbyDelay);
+                }
+                g_State.dirty = true;
+                if (i != 0) Netplay::CancelLanDiscovery();
+            }
+        }
+        ImGui::EndTable();
+    }
+
+    ImGui::Spacing();
+    if (g_State.mode == 0)
+    {
+        ImGui::TextUnformatted(GetLanHostPortLabel());
+        ImGui::SameLine(120.0f);
+        ImGui::SetNextItemWidth(100.0f);
+        if (ImGui::InputInt("##online_room_port", &g_State.hostPort, 0, 0))
+        {
+            g_State.listenPort = g_State.hostPort;
+            g_State.dirty = true;
+        }
+    }
+    else if (g_State.mode == 1)
+    {
+        ImGui::TextUnformatted(GetHostIpLabel());
+        ImGui::SameLine(120.0f);
+        ImGui::SetNextItemWidth(-1.0f);
+        if (ImGui::InputText("##online_host_ip", g_State.hostIp, sizeof(g_State.hostIp))) g_State.dirty = true;
+        ImGui::TextUnformatted(GetHostPortLabel());
+        ImGui::SameLine(120.0f);
+        ImGui::SetNextItemWidth(100.0f);
+        if (ImGui::InputInt("##online_host_port", &g_State.hostPort, 0, 0)) g_State.dirty = true;
+    }
+    else if (g_State.mode == 2)
+    {
+        ImGui::TextUnformatted(GetRelayServerLabel());
+        ImGui::SameLine(120.0f);
+        ImGui::SetNextItemWidth(-1.0f);
+        if (ImGui::InputText("##online_relay_server", g_State.relayServer, sizeof(g_State.relayServer))) g_State.dirty = true;
+        ImGui::TextUnformatted(GetRelayRoomLabel());
+        ImGui::SameLine(120.0f);
+        ImGui::SetNextItemWidth(-1.0f);
+        if (ImGui::InputText("##online_relay_room", g_State.relayRoom, sizeof(g_State.relayRoom))) g_State.dirty = true;
+        if (ImGui::Button(GetRelayConnectLabel(), ImVec2(-1.0f, 30.0f)))
+        {
+            std::string error;
+            if (!Netplay::BeginRelayProbe(g_State.relayServer, &error))
+                SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Relay probe start failed: %s", error.c_str());
+        }
+        ImGui::TextWrapped("%s: %s | %s: %s", GetRelayStatusLabel(), localizedRelayStatusText.c_str(), GetRttLabel(),
+                           relaySnapshot.lastRttMs >= 0 ? std::to_string(relaySnapshot.lastRttMs).c_str() : "--");
+    }
+    else if (g_State.mode == 3)
+    {
+        ImGui::TextUnformatted(TH06_IOS_BluetoothAvailable()
+                                   ? Tr("附近设备可用", "Nearby transport available", "近接接続が利用可能")
+                                   : GetBluetoothUnavailableLabel());
+#ifdef _WIN32
+        ImGui::TextWrapped("%s", Tr("电脑端请使用附近局域网、直接地址或中转房间连接手机。",
+                                     "On Windows, use Nearby LAN, Direct address, or Relay room to connect to iOS.",
+                                     "Windows では Nearby LAN、直接アドレス、または中継ルームを使用してください。"));
+#endif
+    }
+
+    ImGui::Separator();
+    ImGui::TextUnformatted(Tr("连接动作", "Connection action", "接続操作"));
+    ClampState();
+
+    const char *hostActionLabel = g_State.mode == 3 ? GetBluetoothHostLabel()
+                                                     : (g_State.mode == 0 ? GetLanHostLabel() : GetHostButtonLabel(snapshot));
+    const char *guestActionLabel = g_State.mode == 3 ? GetBluetoothGuestLabel()
+        : (g_State.mode == 0 && Netplay::IsLanDiscoveryActive() ? GetLanDiscoverySearchingLabel()
+                                                                : (g_State.mode == 0 ? GetLanGuestLabel() : GetGuestButtonLabel(snapshot)));
+    const bool bluetoothUnavailable = g_State.mode == 3 && !TH06_IOS_BluetoothAvailable();
+    if (bluetoothUnavailable)
+    {
+        ImGui::BeginDisabled();
+    }
+    if (ImGui::Button(hostActionLabel, ImVec2(-1.0f, 36.0f)))
+    {
+        if (g_State.mode == 0)
+        {
+            // The single room-port field is used for both discovery and the
+            // local socket. Guests on another device can use the same number.
+            g_State.listenPort = g_State.hostPort;
+        }
+        if (g_State.mode == 0 || g_State.mode == 3)
+        {
+            g_State.targetDelay = kNearbyDelay;
+            Netplay::SetDelay(kNearbyDelay);
+        }
+        std::string error;
+        bool ok = g_State.mode == 3 ? Netplay::BeginBluetooth(true, &error)
+            : Netplay::BeginHosting(g_State.hostPort,
+                                        g_State.mode == 2 ? g_State.relayServer : "",
+                                        g_State.mode == 2 ? g_State.relayRoom : "", &error);
+        if (!ok) SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Netplay host start failed: %s", error.c_str());
+    }
+    if (ImGui::Button(guestActionLabel, ImVec2(-1.0f, 36.0f)))
+    {
+        if (g_State.mode == 0 && Netplay::IsLanDiscoveryActive())
+        {
+            Netplay::CancelLanDiscovery();
+        }
+        else
+        {
+            if (g_State.mode == 0 || g_State.mode == 3)
+            {
+                g_State.targetDelay = kNearbyDelay;
+                Netplay::SetDelay(kNearbyDelay);
+            }
+            std::string error;
+            bool ok = g_State.mode == 3 ? Netplay::BeginBluetooth(false, &error)
+                                        : g_State.mode == 0 ? Netplay::StartLanDiscovery(g_State.hostPort, &error)
+                                        : Netplay::BeginGuest(g_State.hostIp, g_State.hostPort, g_State.hostPort,
+                                            g_State.mode == 2 ? g_State.relayServer : "",
+                                            g_State.mode == 2 ? g_State.relayRoom : "", &error);
+            if (!ok) SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Netplay guest start failed: %s", error.c_str());
+        }
+    }
+    if (bluetoothUnavailable)
+    {
+        ImGui::EndDisabled();
+    }
+
+    ImGui::TextUnformatted(GetCurStateLabel());
+    ImGui::SameLine(110.0f);
+    ImGui::BeginChildFrame(ImGui::GetID("online_cur_state"), ImVec2(270.0f, 30.0f), ImGuiWindowFlags_NoNav);
+    ImGui::TextUnformatted(localizedStatusText.c_str());
+    ImGui::EndChildFrame();
+
+    ImGui::Separator();
+    ImGui::TextUnformatted(Tr("会话参数", "Session settings", "セッション設定"));
+    ImGui::TextUnformatted(GetTargetDelayLabel());
+    ImGui::SameLine(110.0f);
+    const bool nearbyDelayLocked = g_State.mode == 0 || g_State.mode == 3;
+    if (snapshot.delayLocked || nearbyDelayLocked)
+    {
+        ImGui::BeginDisabled();
+    }
+    ImGui::SetNextItemWidth(100.0f);
+    if (ImGui::InputInt("##online_target_delay", &g_State.targetDelay, 0, 0))
+    {
+        ClampState();
+        Netplay::SetDelay(g_State.targetDelay);
+        g_State.dirty = true;
+    }
+    ImGui::SameLine();
+    const int availableRttMs = snapshot.lastRttMs;
+    if (availableRttMs < 0)
+    {
+        ImGui::BeginDisabled();
+    }
+    if (ImGui::Button(GetAutoDelayLabel(), ImVec2(72.0f, 0.0f)))
+    {
+        g_State.targetDelay = EstimateDelayFromRttMs(availableRttMs);
+        Netplay::SetDelay(g_State.targetDelay);
+        g_State.dirty = true;
+    }
+    if (ImGui::IsItemHovered())
+    {
+        ShowWrappedTooltip(GetAutoDelayTooltip());
+    }
+    if (availableRttMs < 0)
+    {
+        ImGui::EndDisabled();
+    }
+    if (snapshot.delayLocked || nearbyDelayLocked)
+    {
+        ImGui::EndDisabled();
+    }
+
+    if (snapshot.lastRttMs >= 0)
+    {
+        ImGui::Text("%s: %d ms", GetRttLabel(), snapshot.lastRttMs);
+    }
+    else
+    {
+        ImGui::Text("%s: --", GetRttLabel());
+    }
+
+#if 0
+    // Temporarily disabled: the experimental authoritative path is not safe to expose
+    // until host/guest frame ownership and UI startup synchronization are rebuilt.
+    ImGui::TextUnformatted(GetAuthoritativeModeLabel());
+    ImGui::SameLine();
+    ImGui::TextDisabled("(?)");
+    if (ImGui::IsItemHovered())
+    {
+        ShowWrappedTooltip(GetAuthoritativeModeTooltip());
+    }
+    ImGui::SameLine(110.0f);
+    if (snapshot.delayLocked)
+    {
+        ImGui::BeginDisabled();
+    }
+    if (ImGui::Checkbox("##online_authoritative_mode", &g_State.authoritativeModeEnabled))
+    {
+        Netplay::SetAuthoritativeModeEnabled(g_State.authoritativeModeEnabled);
+        g_State.dirty = true;
+    }
+    if (snapshot.delayLocked)
+    {
+        ImGui::EndDisabled();
+    }
+#endif
+
+    if (!snapshot.canStartGame)
+    {
+        ImGui::BeginDisabled();
+    }
+    if (ImGui::Button(GetStartGameLabel(), ImVec2(160.0f, 32.0f)))
+    {
+        Netplay::RequestStartGame();
+    }
+    if (!snapshot.canStartGame)
+    {
+        ImGui::EndDisabled();
+    }
+
+    ImGui::SameLine(220.0f);
+    if (ImGui::Button(GetStartGameLocalLabel(), ImVec2(160.0f, 32.0f)))
+    {
+        Netplay::StartLocalSession();
+    }
+
+    if (ImGui::Button(GetReturnTitleLabel(), ImVec2(160.0f, 28.0f)))
+    {
+        g_State.closeRequested = true;
+    }
+
+    if (!snapshot.isVersionMatched)
+    {
+        ImGui::Spacing();
+        ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "%s", GetVersionMismatchWarning());
+    }
+
+    ImGui::End();
+
+    if (!keepOpen)
+    {
+        g_State.closeRequested = true;
+    }
+
+    if (g_State.dirty)
+    {
+        SaveConfig();
+        g_State.dirty = false;
+    }
+}
+} // namespace th06::OnlineMenu

@@ -1,0 +1,94 @@
+build
+diff
+*.obj
+*.exe
+resources/original.ico
+log.txt
+scripts/dls
+scripts/prefix
+build.ninja
+__pycache__
+
+# Local release artifacts and comparison snapshots
+/_baseline_*/
+/build*/
+/dist/
+*.ipa
+*.zip
+*.dmp
+*.log
+netplay_diag_*.log
+
+# Per-machine runtime state
+/th06.cfg
+/online_netplay.ini
+
+# Temp files
+.ai/
+.claude/
+.codemap/
+SDL2_MIGRATION_PLAN.md
+build_errors.txt
+build_output.txt
+unique_errors.txt
+
+# IDE
+.vs/
+
+# SDL2 build output
+build_sdl2/
+build_sdl2_*/
+build_linux/
+
+build_linux_gles/
+_build_sdl2_backup_*/
+
+# Vulkan backend build output
+build_vk/
+build_vk_*/
+
+# Android build
+android/SDL2_src/
+android/SDL2_image_src/
+android/SDL2_mixer_src/
+android/.gradle/
+android/build/
+android/app/build/
+android/app/.cxx/
+android/app/libs/
+android/app/src/main/assets/
+android/local.properties
+android/cmake_test/
+android/*.keystore
+android/*.pasword.txt
+
+# AI/docs
+CLAUDE.md
+.vscode/
+blog/
+
+# AI prompts / agent instructions / workflow plans — never commit
+AGENTS.md
+AGENT.md
+GEMINI.md
+.github/copilot-instructions.md
+.github/instructions/
+.github/prompts/
+.github/chatmodes/
+*.prompt.md
+*.instructions.md
+*.chatmode.md
+*.agent.md
+SKILL.md
+.claude/
+.codex/
+.copilot/
+.cursor/
+.cursorrules
+.windsurfrules
+.roo/
+.continue/
+.aider*
+.ai-*
+prompts/
+.prompts/

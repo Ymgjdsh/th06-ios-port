@@ -1,0 +1,722 @@
+###############################################################################
+# th06 - 東方紅魔郷 SDL2 移植版构建脚本
+#
+# 用法 (Windows x86):
+#   cmake -B build_sdl2 -A Win32
+#   cmake --build build_sdl2 --config Release
+#
+# 用法 (Windows x64):
+#   cmake -B build_sdl2 -A x64
+#   cmake --build build_sdl2 --config Release
+#
+# 用法 (Linux 32-bit, 在 WSL 或原生 Linux 中):
+#   PKG_CONFIG_PATH=/usr/lib/i386-linux-gnu/pkgconfig cmake -B build_linux -DCMAKE_BUILD_TYPE=Release
+#   cmake --build build_linux --target th06
+#   (需要: sudo apt install gcc-multilib g++-multilib libsdl2-dev:i386 libsdl2-image-dev:i386 libsdl2-mixer-dev:i386 libgl-dev:i386)
+#
+# 用法 (Android, 需要 NDK):
+#   cmake -B build_android -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK/build/cmake/android.toolchain.cmake -DANDROID_ABI=arm64-v8a
+#   cmake --build build_android
+###############################################################################
+
+cmake_minimum_required(VERSION 3.20)
+project(th06_sdl2 LANGUAGES C CXX)
+
+if(IOS OR CMAKE_SYSTEM_NAME STREQUAL "iOS")
+    enable_language(OBJC)
+    enable_language(OBJCXX)
+endif()
+
+# Generate PDB even in Release (for VMProtect / debugging)
+if(MSVC)
+    add_compile_options($<$<CONFIG:Release>:/Zi>)
+    add_link_options($<$<CONFIG:Release>:/DEBUG> $<$<CONFIG:Release>:/OPT:REF> $<$<CONFIG:Release>:/OPT:ICF>)
+endif()
+
+set(CMAKE_C_STANDARD 99)
+set(CMAKE_CXX_STANDARD 17)
+
+# Option: build with OpenGL ES 2.0 shader-based renderer instead of fixed-function GL
+option(USE_GLES "Build with OpenGL ES 2.0 renderer (RendererGLES) instead of fixed-function RendererGL" OFF)
+set(TH06_IOS_VERSION "1.2.5" CACHE STRING "iOS marketing version")
+set(TH06_IOS_BUILD "20" CACHE STRING "iOS build number")
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+# ============================================================================
+# 选项
+# ============================================================================
+option(TH06_USE_SDL2 "使用 SDL2 作为平台后端" ON)
+option(TH06_BUILD_ORIGINAL "构建原始 D3D8/Win32 版本 (仅限 Windows)" OFF)
+option(TH06_ENABLE_PREDICTION_ROLLBACK "编译预测回滚联机代码" OFF)
+
+# ============================================================================
+# SDL2 查找
+# Windows: 使用项目内置的 3rdparty 版本
+# Linux/macOS: 使用系统安装的 SDL2 (pkg-config)
+# ============================================================================
+if(TH06_USE_SDL2)
+  if(WIN32)
+    # Windows: 使用项目自带的预编译 SDL2 库
+    if(CMAKE_SIZEOF_VOID_P EQUAL 8)
+        set(SDL2_ARCH "x64")
+    else()
+        set(SDL2_ARCH "x86")
+    endif()
+
+    set(SDL2_DIR "${CMAKE_SOURCE_DIR}/3rdparty/SDL2")
+    set(SDL2_IMAGE_DIR "${CMAKE_SOURCE_DIR}/3rdparty/SDL2_image")
+    set(SDL2_MIXER_DIR "${CMAKE_SOURCE_DIR}/3rdparty/SDL2_mixer")
+
+    add_library(SDL2::SDL2 SHARED IMPORTED)
+    set_target_properties(SDL2::SDL2 PROPERTIES
+        IMPORTED_LOCATION "${SDL2_DIR}/lib/${SDL2_ARCH}/SDL2.dll"
+        IMPORTED_IMPLIB   "${SDL2_DIR}/lib/${SDL2_ARCH}/SDL2.lib"
+        INTERFACE_INCLUDE_DIRECTORIES "${SDL2_DIR}/include"
+    )
+
+    add_library(SDL2::SDL2main STATIC IMPORTED)
+    set_target_properties(SDL2::SDL2main PROPERTIES
+        IMPORTED_LOCATION "${SDL2_DIR}/lib/${SDL2_ARCH}/SDL2main.lib"
+        INTERFACE_INCLUDE_DIRECTORIES "${SDL2_DIR}/include"
+    )
+
+    add_library(SDL2_image::SDL2_image SHARED IMPORTED)
+    set_target_properties(SDL2_image::SDL2_image PROPERTIES
+        IMPORTED_LOCATION "${SDL2_IMAGE_DIR}/lib/${SDL2_ARCH}/SDL2_image.dll"
+        IMPORTED_IMPLIB   "${SDL2_IMAGE_DIR}/lib/${SDL2_ARCH}/SDL2_image.lib"
+        INTERFACE_INCLUDE_DIRECTORIES "${SDL2_IMAGE_DIR}/include"
+    )
+
+    add_library(SDL2_mixer::SDL2_mixer SHARED IMPORTED)
+    set_target_properties(SDL2_mixer::SDL2_mixer PROPERTIES
+        IMPORTED_LOCATION "${SDL2_MIXER_DIR}/lib/${SDL2_ARCH}/SDL2_mixer.dll"
+        IMPORTED_IMPLIB   "${SDL2_MIXER_DIR}/lib/${SDL2_ARCH}/SDL2_mixer.lib"
+        INTERFACE_INCLUDE_DIRECTORIES "${SDL2_MIXER_DIR}/include"
+    )
+
+    message(STATUS "SDL2 路径: ${SDL2_DIR}")
+    message(STATUS "SDL2_image 路径: ${SDL2_IMAGE_DIR}")
+    message(STATUS "SDL2_mixer 路径: ${SDL2_MIXER_DIR}")
+    message(STATUS "目标架构: ${SDL2_ARCH}")
+  elseif(IOS OR CMAKE_SYSTEM_NAME STREQUAL "iOS")
+    # iOS builds use the vendored SDL stack as static libraries.  Keeping the
+    # dependencies in-tree makes the generated Xcode project reproducible and
+    # avoids relying on Homebrew/pkg-config paths on the Mac build machine.
+    set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build static libraries" FORCE)
+    set(SDL2_DISABLE_INSTALL ON CACHE BOOL "" FORCE)
+    set(SDL2IMAGE_VENDORED ON CACHE BOOL "" FORCE)
+    set(SDL2IMAGE_DEPS_SHARED OFF CACHE BOOL "" FORCE)
+    set(SDL2IMAGE_BACKEND_STB ON CACHE BOOL "" FORCE)
+    set(SDL2IMAGE_BACKEND_IMAGEIO OFF CACHE BOOL "" FORCE)
+    set(SDL2IMAGE_AVIF OFF CACHE BOOL "" FORCE)
+    set(SDL2IMAGE_JXL OFF CACHE BOOL "" FORCE)
+    # Title, menu, result, and ending backgrounds are JPEG files inside the
+    # PBG3 archives. Disabling this produces a valid build that exits during
+    # startup with SDL_image's "Unsupported image format" error.
+    set(SDL2IMAGE_JPG ON CACHE BOOL "" FORCE)
+    set(SDL2IMAGE_TIF OFF CACHE BOOL "" FORCE)
+    set(SDL2IMAGE_WEBP OFF CACHE BOOL "" FORCE)
+    set(SDL2MIXER_VENDORED ON CACHE BOOL "" FORCE)
+    set(SDL2MIXER_DEPS_SHARED OFF CACHE BOOL "" FORCE)
+    set(SDL2MIXER_CMD OFF CACHE BOOL "" FORCE)
+    set(SDL2MIXER_FLAC OFF CACHE BOOL "" FORCE)
+    set(SDL2MIXER_GME OFF CACHE BOOL "" FORCE)
+    set(SDL2MIXER_MOD OFF CACHE BOOL "" FORCE)
+    set(SDL2MIXER_MP3 OFF CACHE BOOL "" FORCE)
+    set(SDL2MIXER_MIDI OFF CACHE BOOL "" FORCE)
+    set(SDL2MIXER_OPUS OFF CACHE BOOL "" FORCE)
+    set(SDL2MIXER_VORBIS STB CACHE STRING "" FORCE)
+    set(SDL2MIXER_WAVE ON CACHE BOOL "" FORCE)
+    set(SDL2MIXER_WAVPACK OFF CACHE BOOL "" FORCE)
+    add_subdirectory("${CMAKE_SOURCE_DIR}/ios/vendor/SDL2" "${CMAKE_BINARY_DIR}/SDL2")
+    add_subdirectory("${CMAKE_SOURCE_DIR}/ios/vendor/SDL2_image" "${CMAKE_BINARY_DIR}/SDL2_image")
+    add_subdirectory("${CMAKE_SOURCE_DIR}/ios/vendor/SDL2_mixer" "${CMAKE_BINARY_DIR}/SDL2_mixer")
+    if(NOT TARGET SDL2_image::SDL2_image)
+        add_library(SDL2_image::SDL2_image ALIAS SDL2_image)
+    endif()
+    if(NOT TARGET SDL2_mixer::SDL2_mixer)
+        add_library(SDL2_mixer::SDL2_mixer ALIAS SDL2_mixer)
+    endif()
+    message(STATUS "SDL2 (iOS): vendored static SDL2 + SDL2_image + SDL2_mixer")
+  else()
+    # Linux/macOS: 通过 pkg-config 查找系统安装的 SDL2
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(SDL2 REQUIRED IMPORTED_TARGET sdl2)
+    pkg_check_modules(SDL2_IMAGE REQUIRED IMPORTED_TARGET SDL2_image)
+    pkg_check_modules(SDL2_MIXER REQUIRED IMPORTED_TARGET SDL2_mixer)
+
+    # 创建兼容的 target 别名
+    if(NOT TARGET SDL2::SDL2)
+        add_library(SDL2::SDL2 ALIAS PkgConfig::SDL2)
+    endif()
+    if(NOT TARGET SDL2_image::SDL2_image)
+        add_library(SDL2_image::SDL2_image ALIAS PkgConfig::SDL2_IMAGE)
+    endif()
+    if(NOT TARGET SDL2_mixer::SDL2_mixer)
+        add_library(SDL2_mixer::SDL2_mixer ALIAS PkgConfig::SDL2_MIXER)
+    endif()
+
+    # Linux 不需要 SDL2main
+    add_library(SDL2::SDL2main INTERFACE IMPORTED)
+
+    message(STATUS "SDL2 (系统): ${SDL2_VERSION}")
+    message(STATUS "SDL2_image (系统): ${SDL2_IMAGE_VERSION}")
+    message(STATUS "SDL2_mixer (系统): ${SDL2_MIXER_VERSION}")
+  endif()
+endif()
+
+# ============================================================================
+# SDL2 验证测试程序
+# ============================================================================
+add_executable(th06_sdl2_test src/sdl2_test.cpp)
+
+target_link_libraries(th06_sdl2_test PRIVATE
+    SDL2::SDL2main
+    SDL2::SDL2
+    SDL2_image::SDL2_image
+    SDL2_mixer::SDL2_mixer
+)
+
+if((CMAKE_CXX_COMPILER_ID STREQUAL "GNU" OR CMAKE_CXX_COMPILER_ID STREQUAL "Clang") AND NOT IOS AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS")
+    target_compile_options(th06_sdl2_test PRIVATE -m32)
+    target_link_options(th06_sdl2_test PRIVATE -m32)
+endif()
+
+# Windows: 复制 DLL 到测试程序输出目录
+if(WIN32)
+    add_custom_command(TARGET th06_sdl2_test POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${SDL2_DIR}/lib/${SDL2_ARCH}/SDL2.dll"
+            $<TARGET_FILE_DIR:th06_sdl2_test>
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${SDL2_IMAGE_DIR}/lib/${SDL2_ARCH}/SDL2_image.dll"
+            $<TARGET_FILE_DIR:th06_sdl2_test>
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${SDL2_MIXER_DIR}/lib/${SDL2_ARCH}/SDL2_mixer.dll"
+            $<TARGET_FILE_DIR:th06_sdl2_test>
+        COMMENT "复制 SDL2 DLL 到输出目录"
+    )
+endif()
+
+# ============================================================================
+# 主游戏可执行文件 th06
+# ============================================================================
+
+# 收集源文件 (排除原版构建专用文件和测试文件)
+set(TH06_GAME_SOURCES
+    src/main.cpp
+    src/AndroidTouchInput.cpp
+    src/TouchVirtualButtons.cpp
+    src/MenuTouchButtons.cpp
+    src/AnmManager.cpp
+    src/AsciiManager.cpp
+    src/AstroBot.cpp
+    src/AstroBotEclForecast.cpp
+    src/BombData.cpp
+    src/BulletData.cpp
+    src/BulletManager.cpp
+    src/Chain.cpp
+    src/CMyFont.cpp
+    src/Controller.cpp
+    src/EclManager.cpp
+    src/EffectManager.cpp
+    src/Ending.cpp
+    src/EnemyEclInstr.cpp
+    src/EnemyManager.cpp
+    src/AssetIO.cpp
+    src/FileSystem.cpp
+    src/GameErrorContext.cpp
+    src/GameManager.cpp
+    src/GamePaths.cpp
+    src/GameplayState.cpp
+    src/GameplayStateBridge.cpp
+    src/GameplayStateAudit.cpp
+    src/GameplayStatePortable.cpp
+    src/GameplayStateCodec.cpp
+    src/GameplayStateValidation.cpp
+    src/GameplayWorldBuilder.cpp
+    src/GameWindow.cpp
+    src/Gui.cpp
+    src/ItemManager.cpp
+    src/MainMenu.cpp
+    src/MidiOutput.cpp
+    src/MusicRoom.cpp
+    src/NetplaySession.cpp
+    src/NetplayAuthoritativeSession.cpp
+    src/NetplayAuthoritativeTransport.cpp
+    src/NetplayAuthoritativeReplicator.cpp
+    src/NetplayAuthoritativePresentation.cpp
+    src/NetplayDiagnostics.cpp
+    src/NetplayConsistency.cpp
+    src/NetplayShell.cpp
+    src/NetplayTransport.cpp
+    src/NetplayUiSync.cpp
+    src/NetplayRollback.cpp
+    src/NetplayRecovery.cpp
+    src/OnlineMenu.cpp
+    src/Player.cpp
+    src/PortableGameplayRestore.cpp
+    src/PortableSnapshotStorage.cpp
+    src/ReplayManager.cpp
+    src/ResultScreen.cpp
+    src/Rng.cpp
+    src/ScreenEffect.cpp
+    src/Session.cpp
+    src/SinglePlayerSnapshot.cpp
+    src/sdl2_renderer.cpp
+    src/SoundPlayer.cpp
+    src/Stage.cpp
+    src/Supervisor.cpp
+    src/TextHelper.cpp
+    src/utils.cpp
+    src/ZunTimer.cpp
+    src/zwave.cpp
+    # pbg3 文件解析库
+    src/pbg3/FileAbstraction.cpp
+    src/pbg3/IPbg3Parser.cpp
+    src/pbg3/Pbg3Archive.cpp
+    src/pbg3/Pbg3Parser.cpp
+    # thprac 练习模式
+    src/thprac_th06.cpp
+    src/thprac_games.cpp
+    src/thprac_gui_components.cpp
+    src/thprac_gui_locale.cpp
+    src/thprac_gui_input.cpp
+    src/thprac_locale_def.cpp
+    src/thprac_gui_integration.cpp
+    # ImGui 核心源文件
+    3rdparty/imgui/imgui.cpp
+    3rdparty/imgui/imgui_draw.cpp
+    3rdparty/imgui/imgui_tables.cpp
+    3rdparty/imgui/imgui_widgets.cpp
+    3rdparty/zstd/single_file/zstd.c
+    # ImGui SDL2+OpenGL2 后端
+    3rdparty/imgui/imgui_impl_sdl.cpp
+    3rdparty/imgui/imgui_impl_opengl2.cpp
+)
+
+# Always compile both renderers and both ImGui GL backends for runtime switching
+list(APPEND TH06_GAME_SOURCES src/RendererGLES.cpp)
+list(APPEND TH06_GAME_SOURCES src/BackendAvailability.cpp)
+list(APPEND TH06_GAME_SOURCES 3rdparty/imgui/imgui_impl_opengl3.cpp)
+
+if(IOS OR CMAKE_SYSTEM_NAME STREQUAL "iOS")
+    # OpenGL ES 2 has no fixed-function API. RendererGL and the ImGui GL2
+    # backend contain glBegin/glMatrixMode calls and must not be compiled into
+    # an iOS target; RendererGLES supplies the renderer and global pointer.
+    list(REMOVE_ITEM TH06_GAME_SOURCES
+        src/sdl2_renderer.cpp
+        3rdparty/imgui/imgui_impl_opengl2.cpp
+    )
+endif()
+
+if(TH06_ENABLE_PREDICTION_ROLLBACK)
+    list(APPEND TH06_GAME_SOURCES src/NetplayRecoveryHeuristics.cpp)
+else()
+    list(APPEND TH06_GAME_SOURCES src/NetplayRecoveryHeuristicsDisabled.cpp)
+endif()
+
+# Platform-specific watchdog/crash-handler implementations. Both Watchdog*.cpp
+# files define the same `th06::WatchdogWin::Init/Shutdown/...` symbols (one as
+# stub, one as the real implementation), so they conflict if both are linked.
+if(WIN32)
+    list(APPEND TH06_GAME_SOURCES src/WatchdogWin.cpp src/CrashHandlerWin.cpp
+        src/BluetoothPeerTransportStub.cpp)
+elseif(IOS OR CMAKE_SYSTEM_NAME STREQUAL "iOS")
+    list(APPEND TH06_GAME_SOURCES
+        src/WatchdogIOS.cpp
+        src/CrashHandlerIOS.cpp
+        ios/LocalNetworkPermission.mm
+        ios/BluetoothPeerTransport.mm)
+else()
+    list(APPEND TH06_GAME_SOURCES src/WatchdogPosix.cpp src/CrashHandlerPosix.cpp
+        src/BluetoothPeerTransportStub.cpp)
+endif()
+
+add_executable(th06 ${TH06_GAME_SOURCES})
+
+if(IOS OR CMAKE_SYSTEM_NAME STREQUAL "iOS")
+    configure_file(
+        "${CMAKE_SOURCE_DIR}/ios/Info.plist.in"
+        "${CMAKE_BINARY_DIR}/th06-Info.plist"
+        @ONLY)
+    set_target_properties(th06 PROPERTIES
+        MACOSX_BUNDLE TRUE
+        MACOSX_BUNDLE_INFO_PLIST "${CMAKE_BINARY_DIR}/th06-Info.plist"
+        XCODE_ATTRIBUTE_TARGETED_DEVICE_FAMILY "1,2"
+        XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER "com.th06.sdl2.ios"
+        XCODE_ATTRIBUTE_IPHONEOS_DEPLOYMENT_TARGET "14.0"
+        XCODE_ATTRIBUTE_CLANG_CXX_LANGUAGE_STANDARD "c++17"
+        XCODE_ATTRIBUTE_CLANG_CXX_LIBRARY "libc++"
+        XCODE_ATTRIBUTE_ASSETCATALOG_COMPILER_APPICON_NAME "AppIcon"
+        XCODE_ATTRIBUTE_CODE_SIGNING_ALLOWED "NO"
+        XCODE_ATTRIBUTE_CODE_SIGN_IDENTITY ""
+    )
+    target_compile_definitions(th06 PRIVATE
+        TH06_IOS=1
+        TH06_MOBILE=1
+        TH06_IOS_VERSION_STRING="${TH06_IOS_VERSION}"
+        TH06_IOS_BUILD_STRING="${TH06_IOS_BUILD}")
+    target_compile_options(th06 PRIVATE
+        -fsigned-char
+        -fno-fast-math
+        -ffp-contract=off
+        # The legacy game code takes the address of short-lived vector
+        # temporaries in a few rendering helpers. MSVC accepts this extension;
+        # Apple Clang diagnoses it as an error unless explicitly disabled.
+        -Wno-address-of-temporary
+    )
+    set_source_files_properties(
+        ios/LaunchScreen.storyboard
+        ios/LaunchImage.png
+        PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
+    target_sources(th06 PRIVATE
+        ios/LaunchScreen.storyboard
+        ios/LaunchImage.png)
+    set_source_files_properties(ios/LocalNetworkPermission.mm ios/BluetoothPeerTransport.mm
+        PROPERTIES COMPILE_OPTIONS "-fno-objc-arc")
+endif()
+
+# Always define TH06_USE_GLES so both backends are available at runtime
+target_compile_definitions(th06 PRIVATE TH06_USE_GLES=1)
+
+if(TH06_ENABLE_PREDICTION_ROLLBACK)
+    target_compile_definitions(th06 PRIVATE TH06_ENABLE_PREDICTION_ROLLBACK=1)
+else()
+    target_compile_definitions(th06 PRIVATE TH06_ENABLE_PREDICTION_ROLLBACK=0)
+endif()
+
+# MSVC: Generate map file for debugging
+if(MSVC)
+    target_link_options(th06 PRIVATE /MAP)
+endif()
+
+# GCC/Clang: 游戏文件格式依赖32位指针大小，必须编译为32位
+if((CMAKE_CXX_COMPILER_ID STREQUAL "GNU" OR CMAKE_CXX_COMPILER_ID STREQUAL "Clang") AND NOT IOS AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS")
+    target_compile_options(th06 PRIVATE
+        -m32                     # 强制32位编译 (文件格式和结构体布局依赖sizeof(void*)==4)
+        -fsigned-char            # ARM默认char为unsigned; 统一为signed以匹配x86和游戏逻辑
+        -Wno-unknown-pragmas     # 忽略MSVC的 #pragma function / #pragma var_order
+        $<$<COMPILE_LANGUAGE:CXX>:-fpermissive>         # 允许GCC不支持的MSVC兼容语法 (额外限定名, 取右值地址等)
+    )
+    target_link_options(th06 PRIVATE -m32)
+endif()
+
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    target_compile_options(th06 PRIVATE
+        $<$<COMPILE_LANGUAGE:CXX>:-Wno-changes-meaning> # union成员名与类型名相同 (EclManager.hpp)
+    )
+endif()
+
+# 包含目录
+target_include_directories(th06 PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/build/autogenerated
+    ${CMAKE_SOURCE_DIR}/3rdparty/rapidjson/include
+    ${CMAKE_SOURCE_DIR}/3rdparty/imgui
+    ${CMAKE_SOURCE_DIR}/3rdparty/zstd
+)
+
+# MSVC: i18n.hpp and thprac files contain UTF-8 CJK strings.
+# Apply /utf-8 globally since i18n.hpp is included by many source files.
+if(MSVC)
+    target_compile_options(th06 PRIVATE /utf-8)
+endif()
+
+# Original replay/demo timing is sensitive to x86 floating-point semantics.
+# The legacy VC7 build used x87-style codegen and consistent float evaluation;
+# modern MSVC defaults can drift enough to desync stock demos. Keep the SDL2
+# Win32 build closer to the original environment without affecting other targets.
+if(MSVC AND WIN32 AND CMAKE_SIZEOF_VOID_P EQUAL 4)
+    target_compile_options(th06 PRIVATE /arch:IA32 /fp:precise /Oi /Ob1 /Oy-)
+
+    # Stock replay compatibility is even more sensitive in the core gameplay
+    # update path than in the rest of the program. Keep these translation units
+    # on conservative codegen so they stay closer to the original VC7 build,
+    # while leaving renderer / SDL / tooling code on normal Release settings.
+    set(TH06_REPLAY_COMPAT_SOURCES
+        src/BombData.cpp
+        src/BulletManager.cpp
+        src/EclManager.cpp
+        src/EffectManager.cpp
+        src/EnemyEclInstr.cpp
+        src/EnemyManager.cpp
+        src/GameManager.cpp
+        src/Gui.cpp
+        src/ItemManager.cpp
+        src/Player.cpp
+        src/ReplayManager.cpp
+        src/Rng.cpp
+        src/ScreenEffect.cpp
+        src/Stage.cpp
+        src/Supervisor.cpp
+        src/ZunTimer.cpp
+    )
+    set_source_files_properties(${TH06_REPLAY_COMPAT_SOURCES}
+        PROPERTIES COMPILE_OPTIONS "/Od;/Oi;/Ob1;/Oy-;/fp:strict"
+    )
+endif()
+
+# i18n.hpp 生成 (UTF-8 → 系统编码)
+# 自动检测系统ANSI代码页，将i18n字符串编码为匹配的编码格式
+# 非ASCII字符(如♪)通过hex escape处理，避免编码兼容问题
+set(I18N_TPL "${CMAKE_SOURCE_DIR}/src/i18n.tpl")
+set(I18N_HPP "${CMAKE_SOURCE_DIR}/build/autogenerated/i18n.hpp")
+
+# 查找 python 可执行文件 (Windows: python, Linux: python3)
+if(WIN32)
+    set(TH06_PYTHON "python")
+else()
+    find_program(TH06_PYTHON NAMES python3 python REQUIRED)
+endif()
+
+# i18n.hpp is always generated as UTF-8.
+# Runtime auto-detection in TextHelper.cpp handles GBK / Shift-JIS game data.
+set(TH_TEXT_ENCODING "utf-8")
+message(STATUS "TH06 text encoding: ${TH_TEXT_ENCODING}")
+
+add_custom_command(
+    OUTPUT "${I18N_HPP}"
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_SOURCE_DIR}/build/autogenerated"
+    COMMAND ${TH06_PYTHON} "${CMAKE_SOURCE_DIR}/scripts/gen_i18n.py"
+        "${I18N_TPL}" "${I18N_HPP}" "${TH_TEXT_ENCODING}"
+    DEPENDS "${I18N_TPL}" "${CMAKE_SOURCE_DIR}/scripts/gen_i18n.py"
+    COMMENT "生成 i18n.hpp (UTF-8)"
+)
+add_custom_target(generate_i18n DEPENDS "${I18N_HPP}")
+add_dependencies(th06 generate_i18n)
+
+# 查找 OpenGL
+if(IOS OR CMAKE_SYSTEM_NAME STREQUAL "iOS")
+    find_library(OPENGL_gl_LIBRARY OpenGLES REQUIRED)
+elseif(NOT WIN32 AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    # 32位编译: 手动指定i386 OpenGL库路径, 避免find_package找到64位版本
+    find_library(OPENGL_gl_LIBRARY NAMES GL PATHS /usr/lib/i386-linux-gnu NO_DEFAULT_PATH)
+    if(NOT OPENGL_gl_LIBRARY)
+        find_package(OpenGL REQUIRED)
+    endif()
+else()
+    find_package(OpenGL REQUIRED)
+endif()
+
+# 链接库
+target_link_libraries(th06 PRIVATE
+    SDL2::SDL2main
+    SDL2::SDL2
+    SDL2_image::SDL2_image
+    SDL2_mixer::SDL2_mixer
+)
+if(OPENGL_gl_LIBRARY)
+    target_link_libraries(th06 PRIVATE ${OPENGL_gl_LIBRARY})
+else()
+    target_link_libraries(th06 PRIVATE OpenGL::GL)
+endif()
+
+if(IOS OR CMAKE_SYSTEM_NAME STREQUAL "iOS")
+    target_link_libraries(th06 PRIVATE "-framework Foundation" "-framework UIKit" "-framework MultipeerConnectivity" "-framework AudioToolbox" "-framework CoreAudio" "-framework OpenGLES")
+endif()
+
+# Windows 特定: Winmm (timeGetTime 兼容)
+if(WIN32)
+    target_link_libraries(th06 PRIVATE winmm dbghelp iphlpapi)
+endif()
+
+# Windows: 复制 DLL 到主游戏输出目录
+if(WIN32)
+    add_custom_command(TARGET th06 POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${SDL2_DIR}/lib/${SDL2_ARCH}/SDL2.dll"
+            $<TARGET_FILE_DIR:th06>
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${SDL2_IMAGE_DIR}/lib/${SDL2_ARCH}/SDL2_image.dll"
+            $<TARGET_FILE_DIR:th06>
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${SDL2_MIXER_DIR}/lib/${SDL2_ARCH}/SDL2_mixer.dll"
+            $<TARGET_FILE_DIR:th06>
+        COMMENT "复制 SDL2 DLL 到游戏输出目录"
+    )
+endif()
+
+# 如果 src/font/Noto Sans SC.ttf 存在，自动部署到游戏输出目录的 font/ 文件夹
+set(FONT_SRC "${CMAKE_SOURCE_DIR}/src/font/Noto Sans SC.ttf")
+if(EXISTS "${FONT_SRC}")
+    add_custom_command(TARGET th06 POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:th06>/font"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${FONT_SRC}"
+            "$<TARGET_FILE_DIR:th06>/font/Noto Sans SC.ttf"
+        COMMENT "部署字体文件到游戏目录"
+    )
+endif()
+
+
+# =============================================================================
+# Vulkan backend (Phase 1 — ADR-011 + ADR-006 whitelist)
+# 纯追加段，不修改上方任何一行。详见 .ai/vulkan_backend/PLAN.md / DECISIONS.md。
+# 默认 OFF：开启方式 cmake -B build_vk -DTH06_USE_VULKAN=ON
+# =============================================================================
+option(TH06_USE_VULKAN "Build Vulkan backend (Phase 1 skeleton + vk_smoketest)" OFF)
+
+if(TH06_USE_VULKAN)
+    # --- 1. 探测 Vulkan headers ---
+    find_package(Vulkan QUIET)
+    if(NOT Vulkan_INCLUDE_DIR AND DEFINED ENV{VULKAN_SDK})
+        set(Vulkan_INCLUDE_DIR "$ENV{VULKAN_SDK}/Include" CACHE PATH "Vulkan headers" FORCE)
+    endif()
+    if(NOT EXISTS "${Vulkan_INCLUDE_DIR}/vulkan/vulkan.h")
+        message(FATAL_ERROR
+            "TH06_USE_VULKAN: vulkan.h not found. "
+            "Install LunarG Vulkan SDK or set VULKAN_SDK env var (ADR-011).")
+    endif()
+    message(STATUS "TH06_USE_VULKAN: headers = ${Vulkan_INCLUDE_DIR}")
+
+    set(TH06_VULKAN_VMA_DIR "${Vulkan_INCLUDE_DIR}" CACHE PATH
+        "Directory whose <vma/vk_mem_alloc.h> resolves the VMA single header.")
+
+    # --- 2. Loader: 用 vendored volk 运行期 LoadLibrary + GetProcAddress。
+    # 该方案彻底避开 32-bit Windows 上 stdcall 名装饰与手生 import lib 不匹配的问题
+    # （ADR-011 Amendment 2）。手生的 3rdparty/Vulkan/lib/x86/vulkan-1.lib 保留作为文档
+    # 成果 / 未来可选回退，不进链接。
+    set(TH06_VOLK_DIR "${CMAKE_SOURCE_DIR}/3rdparty/volk")
+    if(NOT EXISTS "${TH06_VOLK_DIR}/volk.h")
+        message(FATAL_ERROR "TH06_USE_VULKAN: ${TH06_VOLK_DIR}/volk.h missing")
+    endif()
+    message(STATUS "TH06_USE_VULKAN: loader = volk (runtime LoadLibrary)")
+
+    # --- 3. Vulkan 源文件集 (Phase 5 主 target 也将复用) ---
+    # NOTE: RendererVulkan.cpp depends on thprac (HUD log level, unlock-framerate
+    # toggle, etc.). vk_smoketest does not link thprac, so it is excluded here
+    # and added separately to the main th06 target below.
+    set(TH06_VULKAN_SOURCES
+        ${CMAKE_SOURCE_DIR}/src/vulkan/VkContext.cpp
+        ${CMAKE_SOURCE_DIR}/src/vulkan/VkSwapchain.cpp
+        ${CMAKE_SOURCE_DIR}/src/vulkan/VkFrameContext.cpp
+        # Phase 2 additions:
+        ${CMAKE_SOURCE_DIR}/src/vulkan/VkRenderTarget.cpp
+        ${CMAKE_SOURCE_DIR}/src/vulkan/VkPipelineCache.cpp
+        ${CMAKE_SOURCE_DIR}/src/vulkan/VkResources.cpp
+        # Phase 3 additions:
+        ${CMAKE_SOURCE_DIR}/src/vulkan/VmaUsage.cpp
+        ${CMAKE_SOURCE_DIR}/src/vulkan/VkTextureManager.cpp
+        ${TH06_VOLK_DIR}/volk.c
+    )
+
+    # --- 4. 独立 smoke test 可执行（Phase 1 Gate 用）---
+    add_executable(vk_smoketest
+        ${CMAKE_SOURCE_DIR}/tools/vk_smoketest.cpp
+        ${TH06_VULKAN_SOURCES}
+    )
+    target_include_directories(vk_smoketest PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_SOURCE_DIR}/build/autogenerated
+        ${Vulkan_INCLUDE_DIR}
+        ${TH06_VULKAN_VMA_DIR}
+        ${TH06_VOLK_DIR}
+    )
+    target_link_libraries(vk_smoketest PRIVATE
+        SDL2::SDL2main
+        SDL2::SDL2
+        SDL2_image::SDL2_image    # Phase 3: CreateTextureFromMemory uses IMG_Load_RW
+    )
+    target_compile_definitions(vk_smoketest PRIVATE
+        TH06_USE_VULKAN=1
+        VK_NO_PROTOTYPES=1       # 强制全面走 volk 函数指针，避免 link 时跳到未定义的 stdcall 原型
+        TH06_VK_NO_THPRAC=1      # smoketest 不链 thprac_games，关掉 unlock-framerate 钩子
+    )
+    if(MSVC)
+        # 新增 .cpp 是 UTF-8 (无 BOM)；告诉 cl 不要假设源是 codepage 936，消除 C4819
+        target_compile_options(vk_smoketest PRIVATE /utf-8)
+    endif()
+    add_dependencies(vk_smoketest generate_i18n)
+    if(WIN32)
+        add_custom_command(TARGET vk_smoketest POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${SDL2_DIR}/lib/${SDL2_ARCH}/SDL2.dll"
+                $<TARGET_FILE_DIR:vk_smoketest>
+            COMMENT "复制 SDL2.dll 到 vk_smoketest 输出目录"
+        )
+        add_custom_command(TARGET vk_smoketest POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${SDL2_IMAGE_DIR}/lib/${SDL2_ARCH}/SDL2_image.dll"
+                $<TARGET_FILE_DIR:vk_smoketest>
+            COMMENT "复制 SDL2_image.dll 到 vk_smoketest 输出目录 (Phase 3)"
+        )
+    endif()
+    message(STATUS "TH06_USE_VULKAN: vk_smoketest target enabled")
+
+    # --- 5. Phase 2: shaders_vk/*.{vert,frag} -> SPIR-V via glslangValidator (ADR-006 Phase 2 whitelist) ---
+    find_program(TH06_GLSLANG glslangValidator HINTS
+        "$ENV{VULKAN_SDK}/Bin"
+        "${Vulkan_INCLUDE_DIR}/../Bin"
+    )
+    if(NOT TH06_GLSLANG)
+        message(FATAL_ERROR "TH06_USE_VULKAN: glslangValidator not found; install Vulkan SDK (ADR-011).")
+    endif()
+    message(STATUS "TH06_USE_VULKAN: glslangValidator = ${TH06_GLSLANG}")
+
+    set(TH06_VK_SHADER_SRC_DIR "${CMAKE_SOURCE_DIR}/shaders_vk")
+    set(TH06_VK_SHADER_OUT_DIR "${CMAKE_BINARY_DIR}/shaders_vk")
+    file(MAKE_DIRECTORY "${TH06_VK_SHADER_OUT_DIR}")
+    set(TH06_VK_SHADER_NAMES
+        v_diffuse_xyzrwh.vert
+        v_tex1_xyzrwh.vert
+        v_tex1_diffuse_xyzrwh.vert
+        v_tex1_diffuse_xyz.vert
+        v_render_vertex_info.vert
+        v_tex1_diffuse_xyz_clip.vert
+        f_color.frag
+        f_textured.frag
+    )
+    set(TH06_VK_SHADER_SPV "")
+    foreach(_sh IN LISTS TH06_VK_SHADER_NAMES)
+        set(_in  "${TH06_VK_SHADER_SRC_DIR}/${_sh}")
+        set(_out "${TH06_VK_SHADER_OUT_DIR}/${_sh}.spv")
+        add_custom_command(
+            OUTPUT  "${_out}"
+            COMMAND ${TH06_GLSLANG} -V "${_in}" -o "${_out}"
+            DEPENDS "${_in}"
+            COMMENT "glslang -> ${_sh}.spv"
+            VERBATIM
+        )
+        list(APPEND TH06_VK_SHADER_SPV "${_out}")
+    endforeach()
+    add_custom_target(th06_vk_shaders DEPENDS ${TH06_VK_SHADER_SPV})
+    add_dependencies(vk_smoketest th06_vk_shaders)
+    target_compile_definitions(vk_smoketest PRIVATE
+        "TH06_VK_SHADER_DIR=\"${TH06_VK_SHADER_OUT_DIR}\""
+    )
+
+    # --- 6. Phase 5b: link Vulkan sources into main th06 game target so
+    # `--backend=vulkan` actually creates RendererVulkan at runtime.
+    target_sources(th06 PRIVATE
+        ${TH06_VULKAN_SOURCES}
+        ${CMAKE_SOURCE_DIR}/src/RendererVulkan.cpp
+        ${CMAKE_SOURCE_DIR}/3rdparty/imgui/imgui_impl_vulkan.cpp
+    )
+    target_include_directories(th06 PRIVATE
+        ${Vulkan_INCLUDE_DIR}
+        ${TH06_VULKAN_VMA_DIR}
+        ${TH06_VOLK_DIR}
+    )
+    target_compile_definitions(th06 PRIVATE
+        TH06_USE_VULKAN=1
+        VK_NO_PROTOTYPES=1
+        TH06_HAS_IMGUI=1   # Phase 5b.2: enables ImGui Vulkan integration in RendererVulkan
+    )
+    add_dependencies(th06 th06_vk_shaders)
+    target_compile_definitions(th06 PRIVATE
+        "TH06_VK_SHADER_DIR=\"${TH06_VK_SHADER_OUT_DIR}\""
+    )
+
+    # Mirror compiled SPV files next to the executable so AssetIO's
+    # exe-dir-relative search root finds them. Without this, MSVC's
+    # per-config output (Release/) leaves shaders_vk one directory above
+    # the exe, and SPV loads fail at runtime.
+    add_custom_command(TARGET th06 POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:th06>/shaders_vk"
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${TH06_VK_SHADER_OUT_DIR}"
+            "$<TARGET_FILE_DIR:th06>/shaders_vk"
+        COMMENT "Deploying compiled SPV shaders to runtime directory"
+    )
+endif()
