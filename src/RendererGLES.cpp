@@ -2208,6 +2208,7 @@ void RendererGLES::DrawScreenSpaceButtons()
             if (sx < sr)
                 sx = sr;
         }
+        sx += buttons[i].gameXOffset * (portraitGameplay ? portraitButtonScale : yScale);
 
         // --- Filled circle (horizontal-band triangle strip) ---
         {
@@ -2301,6 +2302,7 @@ void RendererGLES::DrawScreenSpaceButtons()
                     sx = hasPillarbox ? (float)offsetX - sr : sr + 8.0f;
                     if (sx < sr) sx = sr;
                 }
+                sx += buttons[i].gameXOffset * (portraitGameplay ? portraitButtonScale : yScale);
 
                 // Pick a pixel size proportional to the button + textScale, then
                 // derive a uniform scale relative to the font's native FontSize.

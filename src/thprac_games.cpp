@@ -276,6 +276,7 @@ void GameGuiEnd(bool draw_cursor)
                             sx = (float)offsetX - sr;
                             if (sx < sr) sx = sr;
                         }
+                        sx += buttons[i].gameXOffset * yScale;
                         // Map (sx, sy, sr) screen pixels -> ImGui logical units
                         ImVec2 c((sx - offsetX) / s, (sy - offsetY) / s);
                         float r = sr / s;

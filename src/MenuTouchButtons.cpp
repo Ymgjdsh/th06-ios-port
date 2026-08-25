@@ -244,6 +244,7 @@ int MenuTouchButtons::GetButtonInfo(TouchButtonInfo *out, int maxCount)
     {
         out[i].gameY       = kMenuButtons[i].centerY;
         out[i].gameRadius  = kMenuButtons[i].radius;
+        out[i].gameXOffset = 0.0f;
         out[i].fillColor   = g_Held[i] ? kMenuButtons[i].fillPressed
                                        : kMenuButtons[i].fillColor;
         out[i].borderColor = kMenuButtons[i].borderColor;

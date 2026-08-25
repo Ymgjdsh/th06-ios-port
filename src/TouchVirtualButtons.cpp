@@ -30,6 +30,7 @@ struct VirtualButtonDef
     float centerY;          // game Y coordinate (also maps to screen Y)
     float radius;           // visual radius in game coordinates
     float hitRadius;        // touch hit radius
+    float xOffset;          // horizontal offset from the pillarbox anchor
     u16 buttonFlag;         // TouhouButton flag (0 if scancode-only)
     SDL_Scancode scancode;  // scancode to inject when held (SDL_SCANCODE_UNKNOWN = none)
     ScreenAnchor anchor;    // which pillarbox this button lives in
@@ -53,28 +54,29 @@ struct VirtualButtonDef
 // circle to miss.
 static const VirtualButtonDef kButtons[] = {
     // ── 左侧黑边: 游戏操作按钮 (LeftPillar) ──
-    // btn_ESC (menu/pause) — hold mode
-    { -24.0f,  46.0f, 24.0f, 32.0f, TH_BUTTON_MENU, SDL_SCANCODE_UNKNOWN, ScreenAnchor::LeftPillar,
+    // btn_ESC (menu/pause) — hold mode. Place it immediately left of the
+    // top-right menu arrow so it cannot overlap the BS/cheat control.
+    { 640.0f + 24.0f,  30.0f, 24.0f, 32.0f, -52.0f, TH_BUTTON_MENU, SDL_SCANCODE_UNKNOWN, ScreenAnchor::RightPillar,
        0x60FFFFFF, 0x98FFFFFF, 0xB0FFFFFF, "ESC", 1.0f, false, false },
     // btn_Z (shoot) — toggle mode: tap to start shooting, tap again to stop
-    { -28.0f, 222.0f, 28.0f, 36.0f, TH_BUTTON_SHOOT, SDL_SCANCODE_UNKNOWN, ScreenAnchor::LeftPillar,
+    { -28.0f, 222.0f, 28.0f, 36.0f, 0.0f, TH_BUTTON_SHOOT, SDL_SCANCODE_UNKNOWN, ScreenAnchor::LeftPillar,
        0x60FFFFFF, 0x98FFFFFF, 0xB0FFFFFF, "Z",   1.6f, true,  false },
     // btn_S (focus/slow) — toggle mode: tap to enable slow, tap again to disable
-    { -28.0f, 302.0f, 28.0f, 36.0f, TH_BUTTON_FOCUS, SDL_SCANCODE_UNKNOWN, ScreenAnchor::LeftPillar,
+    { -28.0f, 302.0f, 28.0f, 36.0f, 0.0f, TH_BUTTON_FOCUS, SDL_SCANCODE_UNKNOWN, ScreenAnchor::LeftPillar,
        0x60FFFFFF, 0x98FFFFFF, 0xB0FFFFFF, "S",   1.6f, true,  false },
     // btn_X (bomb) — hold mode
-    { -28.0f, 382.0f, 28.0f, 36.0f, TH_BUTTON_BOMB, SDL_SCANCODE_UNKNOWN, ScreenAnchor::LeftPillar,
+    { -28.0f, 382.0f, 28.0f, 36.0f, 0.0f, TH_BUTTON_BOMB, SDL_SCANCODE_UNKNOWN, ScreenAnchor::LeftPillar,
        0x60FFFFFF, 0x98FFFFFF, 0xB0FFFFFF, "X",   1.6f, false, false },
 
     // ── 右侧黑边: 常驻功能键 (RightPillar, alwaysVisible=true) ──
     // btn_~ (tilde/grave) — hold mode, 输出 scancode
-    { 660.0f,  80.0f, 20.0f, 28.0f, 0, SDL_SCANCODE_GRAVE, ScreenAnchor::RightPillar,
+    { 660.0f,  80.0f, 20.0f, 28.0f, 0.0f, 0, SDL_SCANCODE_GRAVE, ScreenAnchor::RightPillar,
        0x60FFFFFF, 0x98FFFFFF, 0xB0FFFFFF, "~",   1.4f, false, true },
     // btn_F11 — hold mode, 输出 scancode
-    { 660.0f, 140.0f, 20.0f, 28.0f, 0, SDL_SCANCODE_F11, ScreenAnchor::RightPillar,
+    { 660.0f, 140.0f, 20.0f, 28.0f, 0.0f, 0, SDL_SCANCODE_F11, ScreenAnchor::RightPillar,
        0x60FFFFFF, 0x98FFFFFF, 0xB0FFFFFF, "F11", 0.85f, false, true },
     // btn_Backspace (←) — hold mode, 输出 scancode
-    { 660.0f, 200.0f, 20.0f, 28.0f, 0, SDL_SCANCODE_BACKSPACE, ScreenAnchor::RightPillar,
+    { 660.0f, 200.0f, 20.0f, 28.0f, 0.0f, 0, SDL_SCANCODE_BACKSPACE, ScreenAnchor::RightPillar,
        0x60FFFFFF, 0x98FFFFFF, 0xB0FFFFFF, "BS",  1.0f, false, true },
 };
 
@@ -134,9 +136,11 @@ bool TouchVirtualButtons::HandleFingerDown(SDL_FingerID fingerId, float gameX, f
         // buttons inside the viewport; mirror that adjustment for hit tests.
         float hitCenterX = kButtons[i].centerX;
         if (hitCenterX < 0.0f && gameX >= 0.0f)
-            hitCenterX = kButtons[i].radius + 8.0f;
+            hitCenterX = kButtons[i].radius + 8.0f + kButtons[i].xOffset;
         else if (hitCenterX > 640.0f && gameX <= 640.0f)
-            hitCenterX = 640.0f - kButtons[i].radius - 8.0f;
+            hitCenterX = 640.0f - kButtons[i].radius - 8.0f + kButtons[i].xOffset;
+        else
+            hitCenterX += kButtons[i].xOffset;
         float dx = gameX - hitCenterX;
         float dy = gameY - kButtons[i].centerY;
         float dist = std::sqrt(dx * dx + dy * dy);
@@ -257,6 +261,7 @@ int TouchVirtualButtons::GetButtonInfo(TouchButtonInfo *out, int maxCount)
 
         out[count].gameY       = kButtons[i].centerY;
         out[count].gameRadius  = kButtons[i].radius;
+        out[count].gameXOffset = kButtons[i].xOffset;
         out[count].fillColor   = g_Held[i] ? kButtons[i].fillPressed : kButtons[i].fillColor;
         out[count].borderColor = kButtons[i].borderColor;
         out[count].label       = kButtons[i].label;

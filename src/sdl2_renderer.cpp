@@ -1285,6 +1285,7 @@ void RendererGL::DrawScreenSpaceButtons()
             sx = (float)offsetX - sr;
             if (sx < sr) sx = sr;
         }
+        sx += buttons[i].gameXOffset * yScale;
 
         // Filled circle as TRIANGLE_FAN
         {
@@ -1348,6 +1349,7 @@ void RendererGL::DrawScreenSpaceButtons()
                     sx = (float)offsetX - sr;
                     if (sx < sr) sx = sr;
                 }
+                sx += buttons[i].gameXOffset * yScale;
 
                 float pixelHeight = 16.0f * buttons[i].textScale * yScale;
                 float fontScale = pixelHeight / font->FontSize;

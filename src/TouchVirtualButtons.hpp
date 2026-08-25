@@ -23,6 +23,7 @@ struct TouchButtonInfo
 {
     float gameY;         // Y position in game coordinates (640×480)
     float gameRadius;    // visual radius in game coordinates
+    float gameXOffset;   // horizontal offset from the selected pillarbox anchor
     D3DCOLOR fillColor;
     D3DCOLOR borderColor;
     const char *label;
