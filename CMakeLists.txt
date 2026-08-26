@@ -38,8 +38,8 @@ set(CMAKE_CXX_STANDARD 17)
 
 # Option: build with OpenGL ES 2.0 shader-based renderer instead of fixed-function GL
 option(USE_GLES "Build with OpenGL ES 2.0 renderer (RendererGLES) instead of fixed-function RendererGL" OFF)
-set(TH06_IOS_VERSION "1.3.1" CACHE STRING "iOS marketing version")
-set(TH06_IOS_BUILD "24" CACHE STRING "iOS build number")
+set(TH06_IOS_VERSION "1.3.2" CACHE STRING "iOS marketing version")
+set(TH06_IOS_BUILD "25" CACHE STRING "iOS build number")
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # ============================================================================

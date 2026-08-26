@@ -6,8 +6,8 @@ param(
     [string]$KeyPath = "$env:USERPROFILE\.ssh\th07_mac",
     [string]$RemoteFolder = "th06-build",
     [string]$XcodeApp = "/Applications/Xcode.app",
-    [string]$IosVersion = "1.3.1",
-    [int]$IosBuild = 24,
+    [string]$IosVersion = "1.3.2",
+    [int]$IosBuild = 25,
     [switch]$OverwriteDesktop
 )
 

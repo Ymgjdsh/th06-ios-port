@@ -1577,10 +1577,21 @@ ZunResult ResultScreen::CheckConfirmButton()
         }
         if (this->frameTimer >= 90 && WAS_PRESSED(TH_BUTTON_SELECTMENU))
         {
-            viewport = &this->unk_40[37];
-            viewport->pendingInterrupt = 2;
             this->frameTimer = 0;
-            this->resultScreenState = RESULT_SCREEN_STATE_STATS_TO_SAVE_TRANSITION;
+            if (EndlessMode::IsSelected())
+            {
+                for (i32 i = 0; i < ARRAY_SIZE_SIGNED(this->unk_40); ++i)
+                {
+                    this->unk_40[i].pendingInterrupt = 2;
+                }
+                this->resultScreenState = RESULT_SCREEN_STATE_EXITING;
+            }
+            else
+            {
+                viewport = &this->unk_40[37];
+                viewport->pendingInterrupt = 2;
+                this->resultScreenState = RESULT_SCREEN_STATE_STATS_TO_SAVE_TRANSITION;
+            }
         }
         break;
 
@@ -1614,6 +1625,28 @@ u32 ResultScreen::DrawFinalStats()
         color = viewport->color;
         g_AsciiManager.color = color;
         unknownFloat = 0.0;
+
+        if (EndlessMode::IsSelected())
+        {
+            const u32 frames = EndlessMode::SurvivalFrames();
+            const u32 seconds = frames / 60;
+            const i32 maxTier = EndlessMode::IntensityLevel();
+
+            strPos = viewport->pos;
+            strPos.x += 190.0f;
+            strPos.y += 32.0f;
+            g_AsciiManager.AddFormatText(&strPos, "%s", "ENDLESS RESULT");
+            strPos.y += 30.0f;
+            g_AsciiManager.AddFormatText(&strPos, "SCORE       %9d", g_GameManager.score);
+            strPos.y += 24.0f;
+            g_AsciiManager.AddFormatText(&strPos, "SURVIVAL       %02u:%02u", (unsigned)(seconds / 60),
+                                         (unsigned)(seconds % 60));
+            strPos.y += 24.0f;
+            g_AsciiManager.AddFormatText(&strPos, "MAX LEVEL          %d/6", maxTier);
+            strPos.y += 40.0f;
+            g_AsciiManager.AddFormatText(&strPos, "%s", "PRESS OR TAP TO RETURN");
+            return 0;
+        }
 
         completion = g_GameManager.difficulty < 4 ? g_GameManager.counat / 89500.0f : g_GameManager.counat / 39600.0f;
         strPos = viewport->pos;
@@ -1739,6 +1772,10 @@ ZunResult ResultScreen::RegisterChain(i32 unk)
         if (!g_GameManager.isInPracticeMode)
         {
             resultScreen->resultScreenState = RESULT_SCREEN_STATE_WRITING_HIGHSCORE_NAME;
+        }
+        else if (EndlessMode::IsSelected())
+        {
+            resultScreen->resultScreenState = RESULT_SCREEN_STATE_STATS_SCREEN;
         }
         else
         {

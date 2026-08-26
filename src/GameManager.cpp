@@ -640,7 +640,7 @@ ZunResult GameManager::AddedCallback(GameManager *mgr)
             return ZUN_ERROR;
         }
         SDL_LogCritical(SDL_LOG_CATEGORY_APPLICATION,
-                        "[Endless] active: stage=1 warmup=180 cap=460 ramp=18000");
+                        "[Endless] active: stage=1 warmup=180 cap=520 ramp=14400");
     }
     else
     {

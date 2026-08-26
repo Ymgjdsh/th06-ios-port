@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ZunResult.hpp"
+#include "inttypes.hpp"
 
 struct ImDrawList;
 
@@ -12,6 +13,8 @@ namespace EndlessMode
 {
 bool IsSelected();
 bool IsActive();
+u32 SurvivalFrames();
+i32 IntensityLevel();
 void SetSelected(bool selected);
 void Reset();
 

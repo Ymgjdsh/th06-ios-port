@@ -23,8 +23,8 @@ namespace th06::EndlessMode
 namespace
 {
 constexpr u32 kWarmupFrames = 3 * 60;
-constexpr u32 kRampFrames = 5 * 60 * 60;
-constexpr i32 kBulletSoftCap = 460;
+constexpr u32 kRampFrames = 4 * 60 * 60;
+constexpr i32 kBulletSoftCap = 520;
 constexpr i16 kBulletTypeCount = 10;
 constexpr i16 kSafeColorCount = 8;
 constexpr f32 kSafeSpawnDistance = 120.0f;
@@ -167,10 +167,10 @@ void EmitBurst(i32 family, i32 step, i32 total, f32 intensity)
         props.aimMode = FAN_AIMED;
         props.angle1 = (RandomFloat(0.18f) - 0.09f);
         props.angle2 = 0.12f + intensity * 0.035f;
-        props.count1 = (i16)(5 + tier * 2);
-        props.count2 = (i16)(1 + tier / 3);
-        props.speed1 = 1.65f + intensity * 1.25f;
-        props.speed2 = 1.05f + intensity * 0.75f;
+        props.count1 = (i16)(7 + tier * 2);
+        props.count2 = (i16)(1 + tier / 2);
+        props.speed1 = 1.8f + intensity * 1.35f;
+        props.speed2 = 1.15f + intensity * 0.8f;
         FinishProps(props, family, false);
         break;
 
@@ -179,8 +179,8 @@ void EmitBurst(i32 family, i32 step, i32 total, f32 intensity)
         props.aimMode = CIRCLE_AIMED;
         props.angle1 = step * 0.11f + RandomFloat(0.12f);
         props.angle2 = 0.0f;
-        props.count1 = (i16)(14 + tier * 3);
-        props.speed1 = 1.05f + intensity * 1.2f;
+        props.count1 = (i16)(18 + tier * 4);
+        props.speed1 = 1.15f + intensity * 1.3f;
         props.speed2 = props.speed1;
         FinishProps(props, family, false);
         break;
@@ -192,8 +192,8 @@ void EmitBurst(i32 family, i32 step, i32 total, f32 intensity)
         props.aimMode = FAN;
         props.angle1 = ZUN_PI * 0.5f + ((step & 1) ? 0.08f : -0.08f);
         props.angle2 = 0.10f;
-        props.count1 = (i16)(3 + tier);
-        props.speed1 = 1.5f + intensity * 1.15f;
+        props.count1 = (i16)(4 + tier);
+        props.speed1 = 1.65f + intensity * 1.2f;
         props.speed2 = props.speed1;
         FinishProps(props, family, false);
         break;
@@ -206,7 +206,7 @@ void EmitBurst(i32 family, i32 step, i32 total, f32 intensity)
         props.angle2 = 1.02f;
         props.speed1 = 1.15f + intensity * 0.55f;
         props.speed2 = 0.48f + intensity * 0.25f;
-        props.count1 = (i16)(2 + tier);
+        props.count1 = (i16)(3 + tier);
         props.count2 = 1;
         FinishProps(props, family, true);
         break;
@@ -216,8 +216,8 @@ void EmitBurst(i32 family, i32 step, i32 total, f32 intensity)
         props.aimMode = (step & 1) ? OFFSET_CIRCLE_AIMED : CIRCLE_AIMED;
         props.angle1 = step * (0.15f + intensity * 0.05f);
         props.angle2 = 0.0f;
-        props.count1 = (i16)(12 + tier * 3);
-        props.speed1 = 0.95f + intensity * 1.0f;
+        props.count1 = (i16)(16 + tier * 3);
+        props.speed1 = 1.05f + intensity * 1.1f;
         props.speed2 = props.speed1;
         FinishProps(props, family, true);
         break;
@@ -229,8 +229,8 @@ void EmitBurst(i32 family, i32 step, i32 total, f32 intensity)
         props.aimMode = FAN;
         props.angle1 = g_State.side == 0 ? 0.0f : ZUN_PI;
         props.angle2 = 0.075f + intensity * 0.025f;
-        props.count1 = (i16)(3 + tier);
-        props.speed1 = 1.45f + intensity * 1.25f;
+        props.count1 = (i16)(4 + tier);
+        props.speed1 = 1.6f + intensity * 1.3f;
         props.speed2 = props.speed1;
         FinishProps(props, family, false);
         break;
@@ -285,19 +285,19 @@ void BeginWave()
         g_State.burstInterval = 12;
         break;
     case 2:
-        g_State.burstTotal = 6 + tier;
+        g_State.burstTotal = 7 + tier;
         g_State.burstInterval = std::max(6, 12 - tier);
         break;
     case 3:
-        g_State.burstTotal = 5 + tier;
+        g_State.burstTotal = 6 + tier;
         g_State.burstInterval = std::max(7, 14 - tier);
         break;
     case 4:
-        g_State.burstTotal = 3 + tier / 2;
+        g_State.burstTotal = 4 + tier / 2;
         g_State.burstInterval = std::max(9, 17 - tier);
         break;
     default:
-        g_State.burstTotal = 5 + tier;
+        g_State.burstTotal = 6 + tier;
         g_State.burstInterval = std::max(7, 13 - tier);
         break;
     }
@@ -342,14 +342,14 @@ ChainCallbackResult OnUpdate(void *)
         g_State.nextBurstFrame = g_State.elapsedFrames + (u32)g_State.burstInterval;
         if (g_State.pendingBursts == 0)
         {
-            const u32 gap = (u32)(96.0f - Intensity() * 62.0f) + (u32)RandomInt(25);
+            const u32 gap = (u32)(78.0f - Intensity() * 50.0f) + (u32)RandomInt(18);
             g_State.nextWaveFrame = g_State.elapsedFrames + gap;
         }
         return CHAIN_CALLBACK_RESULT_CONTINUE;
     }
 
-    const u32 restCycle = g_State.elapsedFrames % (34 * 60);
-    const bool resting = restCycle >= 30 * 60;
+    const u32 restCycle = g_State.elapsedFrames % (32 * 60);
+    const bool resting = restCycle >= 29 * 60;
     if (!resting && g_State.pendingBursts == 0 && g_State.elapsedFrames >= g_State.nextWaveFrame)
     {
         BeginWave();
@@ -387,6 +387,16 @@ bool IsSelected()
 bool IsActive()
 {
     return g_State.active;
+}
+
+u32 SurvivalFrames()
+{
+    return g_State.elapsedFrames;
+}
+
+i32 IntensityLevel()
+{
+    return IntensityTier();
 }
 
 void SetSelected(bool selected)

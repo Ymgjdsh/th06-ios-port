@@ -10,6 +10,7 @@
 #include "Controller.hpp"
 #include "EclManager.hpp"
 #include "EffectManager.hpp"
+#include "EndlessMode.hpp"
 #include "EnemyManager.hpp"
 #include "GameManager.hpp"
 #include "Gui.hpp"
@@ -1927,8 +1928,11 @@ void Player::ScoreGraze(D3DXVECTOR3 *center)
 
     particlePosition = (this->positionCenter + *center) / 2.0f;
     g_EffectManager.SpawnParticles(PARTICLE_EFFECT_UNK_8, &particlePosition, 1, COLOR_WHITE);
-    g_GameManager.AddScore(500);
-    g_GameManager.IncreaseSubrank(6);
+    if (!EndlessMode::IsActive())
+    {
+        g_GameManager.AddScore(500);
+        g_GameManager.IncreaseSubrank(6);
+    }
     g_Gui.flags.flag3 = 2;
     g_SoundPlayer.PlaySoundByIdx(SOUND_GRAZE, 0);
 }
