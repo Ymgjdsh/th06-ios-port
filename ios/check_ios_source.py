@@ -59,9 +59,9 @@ def main() -> int:
 
     markers = (
         ("iOS version", cmake, 'TH06_IOS_VERSION "1.2.5"'),
-        ("iOS build", cmake, 'TH06_IOS_BUILD "20"'),
+        ("iOS build", cmake, 'TH06_IOS_BUILD "22"'),
         ("build script version", build, "IOS_VERSION=${IOS_VERSION:-1.2.5}"),
-        ("build script build", build, "IOS_BUILD=${IOS_BUILD:-20}"),
+        ("build script build", build, "IOS_BUILD=${IOS_BUILD:-22}"),
         ("stable lockstep default", cmake,
          'TH06_ENABLE_PREDICTION_ROLLBACK "编译预测回滚联机代码" OFF'),
         ("stable lockstep iOS build", build, "-DTH06_ENABLE_PREDICTION_ROLLBACK=OFF"),
@@ -79,6 +79,11 @@ def main() -> int:
         ("native Bonjour permission trigger", permission_probe, "searchForServicesOfType"),
         ("Bonjour host publication", permission_probe, "TH06_IOS_StartBonjourHost"),
         ("Bonjour host result", permission_probe, "TH06_IOS_PollBonjourHost"),
+        ("Bonjour IPv6 discovery", permission_probe, "AF_INET6"),
+        ("Bonjour scoped IPv6 discovery", permission_probe, "if_indextoname"),
+        ("Bonjour hostname fallback", permission_probe, "using hostname fallback"),
+        ("Bonjour publication success callback", permission_probe, "netServiceDidPublish"),
+        ("Bonjour publication failure callback", permission_probe, "didNotPublish"),
         ("permission trigger diagnostic", permission_probe, "[local-network] Bonjour permission probe start"),
         ("permission state query", permission_probe, "TH06_IOS_GetLocalNetworkPermissionState"),
         ("permission probe idempotence", permission_probe, "if (_searching)"),

@@ -75,6 +75,7 @@ static PeerBridge *gBridge = nil;
         connected = NO;
         status = role ? "advertising nearby" : "searching nearby";
     }
+    NSLog(@"[nearby] starting role=%@ service=%s", role ? @"host" : @"guest", kServiceType);
     if (role) [advertiser startAdvertisingPeer];
     [browser startBrowsingForPeers];
 }
@@ -163,6 +164,7 @@ static PeerBridge *gBridge = nil;
             return;
         activeSession = [session retain];
     }
+    NSLog(@"[nearby] found host peer=%@ info=%@", peerID.displayName, info);
     [browser invitePeer:peerID toSession:activeSession withContext:nil timeout:10.0];
     [activeSession release];
 }
@@ -172,6 +174,7 @@ static PeerBridge *gBridge = nil;
     if (session != self->session) return;
     connected = state == MCSessionStateConnected;
     status = connected ? "connected" : (state == MCSessionStateConnecting ? "connecting" : "nearby disconnected");
+    NSLog(@"[nearby] peer=%@ state=%ld", peerID.displayName, (long)state);
 }
 
 - (void)session:(MCSession *)session didReceiveData:(NSData *)data fromPeer:(MCPeerID *)peerID {
@@ -197,12 +200,16 @@ static PeerBridge *gBridge = nil;
     if (browser != self->browser) return;
     connected = NO;
     status = error.localizedDescription.UTF8String ? error.localizedDescription.UTF8String : "browser failed";
+    NSLog(@"[nearby] browser failed domain=%@ code=%ld description=%@",
+          error.domain, (long)error.code, error.localizedDescription);
 }
 - (void)advertiser:(MCNearbyServiceAdvertiser *)advertiser didNotStartAdvertisingPeer:(NSError *)error {
     std::lock_guard<std::mutex> lock(mutex);
     if (advertiser != self->advertiser) return;
     connected = NO;
     status = error.localizedDescription.UTF8String ? error.localizedDescription.UTF8String : "advertiser failed";
+    NSLog(@"[nearby] advertiser failed domain=%@ code=%ld description=%@",
+          error.domain, (long)error.code, error.localizedDescription);
 }
 @end
 

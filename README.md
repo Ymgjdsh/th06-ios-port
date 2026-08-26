@@ -9,7 +9,7 @@
 
 ## 当前状态
 
-- 当前 iOS 版本：`1.2.5 (20)`
+- 当前 iOS 版本：`1.2.5 (22)`
 - 最低系统：iOS / iPadOS 14.0
 - 架构：arm64
 - 安装方式：使用 TrollStore 安装 ad-hoc 签名 IPA
@@ -78,7 +78,7 @@ chmod +x ios/build_ios.sh ios/package_ipa.sh
 默认产物：
 
 ```text
-build-ios/th06-ios-1.2.5-20.ipa
+build-ios/th06-ios-1.2.5-22.ipa
 ```
 
 构建流程会执行源码预检、干净构建、资源完整性检查、版本检查、Bonjour/蓝牙权限声明检查、ad-hoc 签名和 IPA 打包。Release 构建默认删除旧的 `build-ios`，避免陈旧对象或资源混入新包。
@@ -92,13 +92,13 @@ powershell -ExecutionPolicy Bypass -File .\ios\build_on_mac.ps1 `
   -MacHost 10.0.0.142 `
   -MacUser dick `
   -IosVersion 1.2.5 `
-  -IosBuild 20
+  -IosBuild 22
 ```
 
 脚本成功或失败后都会清理 Mac 上对应的临时源码包和构建目录。成功产物名称包含 Git 短提交号，例如：
 
 ```text
-~/Desktop/th06-ios-1.2.5-20-813e2aa.ipa
+~/Desktop/th06-ios-1.2.5-22-<commit>.ipa
 ```
 
 提交号比重复使用的应用版本号更可靠。定位回归时，请同时记录完整 Git commit 和唯一 tag，不要只记录 `1.2.5 (20)`。

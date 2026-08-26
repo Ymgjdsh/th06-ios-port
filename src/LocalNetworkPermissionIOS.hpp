@@ -3,8 +3,9 @@
 #ifdef TH06_IOS
 extern "C" void TH06_IOS_TriggerLocalNetworkPermission();
 extern "C" void TH06_IOS_StopLocalNetworkPermissionProbe();
-// 0 = idle, 1 = permission probe is starting, 2 = Bonjour search active,
-// -1 = iOS rejected the local-network search.
+// 0 = idle, 1 = permission probe is starting, 2 = Bonjour browser active,
+// -1 = iOS could not start the local-network search. Browser activity alone
+// does not prove that the privacy permission was granted.
 extern "C" int TH06_IOS_GetLocalNetworkPermissionState();
 extern "C" void TH06_IOS_StartBonjourHost(int port);
 extern "C" void TH06_IOS_StopBonjourHost();

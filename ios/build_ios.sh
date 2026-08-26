@@ -5,7 +5,7 @@ ROOT_DIR=$(cd "$(dirname "$0")/.." && pwd)
 BUILD_DIR=${BUILD_DIR:-"$ROOT_DIR/build-ios"}
 CONFIG=${CONFIG:-Release}
 IOS_VERSION=${IOS_VERSION:-1.2.5}
-IOS_BUILD=${IOS_BUILD:-20}
+IOS_BUILD=${IOS_BUILD:-22}
 OUTPUT_IPA=${OUTPUT_IPA:-"$ROOT_DIR/build-ios/th06-ios-${IOS_VERSION}-${IOS_BUILD}.ipa"}
 BGM_DIR=${BGM_DIR:-"$ROOT_DIR/ios/bgm"}
 
@@ -65,8 +65,8 @@ else
 fi
 codesign --force --deep --sign - "$APP_PATH"
 
-if ! strings "$APP_PATH/th06" | grep -Fq "netplay-ui=3.9.0"; then
-    echo "error: built executable does not contain the 3.9.0 source marker" >&2
+if ! strings "$APP_PATH/th06" | grep -Fq "netplay-ui=3.9.1"; then
+    echo "error: built executable does not contain the 3.9.1 source marker" >&2
     exit 4
 fi
 
@@ -90,5 +90,5 @@ if ! /usr/libexec/PlistBuddy -c 'Print :NSBluetoothAlwaysUsageDescription' "$APP
     exit 8
 fi
 
-echo "Verified package version $PLIST_VERSION ($PLIST_BUILD), netplay UI 3.9.0, nearby transports"
+echo "Verified package version $PLIST_VERSION ($PLIST_BUILD), netplay UI 3.9.1, nearby transports"
 "$ROOT_DIR/ios/package_ipa.sh" "$APP_PATH" "$OUTPUT_IPA"

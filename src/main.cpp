@@ -208,7 +208,7 @@ int main(int argc, char *argv[])
     // the persisted thprac option has logging disabled.
     SDL_LogSetAllPriority(SDL_LOG_PRIORITY_INFO);
     SDL_LogCritical(SDL_LOG_CATEGORY_APPLICATION,
-                    "[IOS-BOOT] package version=%s build=%s netplay-ui=3.9.0",
+                    "[IOS-BOOT] package version=%s build=%s netplay-ui=3.9.1",
                     TH06_IOS_VERSION_STRING, TH06_IOS_BUILD_STRING);
     SDL_LogCritical(SDL_LOG_CATEGORY_APPLICATION, "[IOS-BOOT] GamePaths initialized");
 #endif

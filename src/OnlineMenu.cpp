@@ -76,7 +76,7 @@ void ShowWrappedTooltip(const char *text, float wrapWidth = 320.0f)
 
 std::string GetLauncherTitle()
 {
-    return std::string(Tr("联机启动器", "Game Launcher", "ネットワーク起動")) + " [ver=3.9.0]";
+    return std::string(Tr("联机启动器", "Game Launcher", "ネットワーク起動")) + " [ver=3.9.1]";
 }
 
 const char *GetHostIpLabel() { return Tr("主机 IP:", "Host IP:", "ホスト IP:"); }
@@ -573,7 +573,7 @@ void Open()
     // a later LAN-search tap never races the Bonjour permission request.
     TH06_IOS_TriggerLocalNetworkPermission();
     SDL_LogCritical(SDL_LOG_CATEGORY_APPLICATION,
-                    "[OnlineMenu] opened netplay-ui=3.9.0 modes=4 window=450x460");
+                    "[OnlineMenu] opened netplay-ui=3.9.1 modes=4 window=450x460");
 }
 
 void Close()

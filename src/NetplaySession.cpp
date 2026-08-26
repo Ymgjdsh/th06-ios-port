@@ -206,8 +206,8 @@ void TickLanDiscoveryInternal()
         if (permissionState == -1)
         {
             SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
-                        "[netplay/discovery] local-network permission denied; stopping LAN search");
-            SetStatus("local network permission denied");
+                        "[netplay/discovery] Bonjour browser unavailable; local-network permission or configuration rejected the search");
+            SetStatus("local network search unavailable");
             CloseLanDiscoverySocket();
             return;
         }
@@ -215,7 +215,7 @@ void TickLanDiscoveryInternal()
         {
             g_LanDiscovery.permissionReady = true;
             g_LanDiscovery.nextBroadcastTick = now + 100;
-            SDL_Log("[netplay/discovery] local-network permission probe ready; beginning UDP broadcast");
+            SDL_Log("[netplay/discovery] Bonjour browser active; beginning UDP broadcast fallback");
         }
         else if (now < g_LanDiscovery.permissionWaitDeadlineTick)
         {
@@ -1359,6 +1359,10 @@ bool BeginGuest(const std::string &hostIp, int hostPort, int listenPort, const s
 bool BeginBluetooth(bool hostRole, std::string *errorMessage)
 {
     CancelPendingConnection();
+    // MultipeerConnectivity discovery is covered by iOS local-network privacy.
+    // Start our declared Bonjour probe so iOS can present or re-evaluate that
+    // permission before nearby advertising and browsing begin.
+    TH06_IOS_TriggerLocalNetworkPermission();
     if (!TH06_IOS_BluetoothAvailable())
     {
         if (errorMessage != nullptr) *errorMessage = "nearby Bluetooth transport is available on iOS only";

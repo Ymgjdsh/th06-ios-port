@@ -7,10 +7,16 @@
 #include <arpa/inet.h>
 #include <cstring>
 #include <cstdio>
+#include <net/if.h>
 #include <netinet/in.h>
 
 static std::atomic<int> g_TH06LocalNetworkPermissionState(0);
 static NSNetService *g_TH06BonjourHostService = nil;
+
+@interface TH06BonjourHostPublisherDelegate : NSObject <NSNetServiceDelegate>
+@end
+
+static TH06BonjourHostPublisherDelegate *g_TH06BonjourHostDelegate = nil;
 
 @interface TH06LocalNetworkPermissionProbe : NSObject <NSNetServiceBrowserDelegate, NSNetServiceDelegate>
 {
@@ -103,7 +109,8 @@ static NSNetService *g_TH06BonjourHostService = nil;
         _resolvedPort = 0;
     }
     _searching = NO;
-    g_TH06LocalNetworkPermissionState.store(0);
+    if (g_TH06LocalNetworkPermissionState.load() != -1)
+        g_TH06LocalNetworkPermissionState.store(0);
     SDL_LogCritical(SDL_LOG_CATEGORY_APPLICATION,
                     "[local-network] Bonjour permission probe stopped");
 }
@@ -114,7 +121,7 @@ static NSNetService *g_TH06BonjourHostService = nil;
     _searching = YES;
     g_TH06LocalNetworkPermissionState.store(2);
     SDL_LogCritical(SDL_LOG_CATEGORY_APPLICATION,
-                    "[local-network] Bonjour browser searching; iOS permission request accepted for processing");
+                    "[local-network] Bonjour browser active; this confirms startup, not permission grant");
 }
 
 - (void)netServiceBrowserDidStopSearch:(NSNetServiceBrowser *)browser
@@ -149,35 +156,115 @@ static NSNetService *g_TH06BonjourHostService = nil;
     {
         [_resolvingServices addObject:service];
     }
+    SDL_LogCritical(SDL_LOG_CATEGORY_APPLICATION,
+                    "[netplay/discovery] Bonjour service found name=%s type=%s domain=%s more=%d",
+                    [[service name] UTF8String], [[service type] UTF8String],
+                    [[service domain] UTF8String], moreComing ? 1 : 0);
     [service setDelegate:self];
     [service resolveWithTimeout:3.0];
 }
 
 - (void)netServiceDidResolveAddress:(NSNetService *)service
 {
-    char addressText[INET6_ADDRSTRLEN] = {};
+    NSString *selectedHost = nil;
+    int selectedRank = 100;
     for (NSData *addressData in [service addresses])
     {
         const struct sockaddr *address = (const struct sockaddr *)[addressData bytes];
-        if (address != NULL && address->sa_family == AF_INET)
+        if (address == NULL)
+            continue;
+
+        char addressText[INET6_ADDRSTRLEN + IF_NAMESIZE + 16] = {};
+        int rank = 100;
+        const char *familyText = "other";
+        if (address->sa_family == AF_INET && [addressData length] >= sizeof(sockaddr_in))
         {
             const struct sockaddr_in *address4 = (const struct sockaddr_in *)address;
-            if (inet_ntop(AF_INET, &address4->sin_addr, addressText, sizeof(addressText)) != NULL)
-                break;
+            if (inet_ntop(AF_INET, &address4->sin_addr, addressText, sizeof(addressText)) == NULL)
+                continue;
+            familyText = "IPv4";
+            const uint32_t hostAddress = ntohl(address4->sin_addr.s_addr);
+            if (hostAddress == INADDR_ANY)
+                continue;
+            rank = (hostAddress & 0xff000000u) == 0x7f000000u ? 30 : 0;
+        }
+        else if (address->sa_family == AF_INET6 && [addressData length] >= sizeof(sockaddr_in6))
+        {
+            const struct sockaddr_in6 *address6 = (const struct sockaddr_in6 *)address;
+            if (IN6_IS_ADDR_UNSPECIFIED(&address6->sin6_addr))
+                continue;
+            if (inet_ntop(AF_INET6, &address6->sin6_addr, addressText, sizeof(addressText)) == NULL)
+                continue;
+            familyText = "IPv6";
+            rank = IN6_IS_ADDR_LOOPBACK(&address6->sin6_addr) ? 40
+                   : (IN6_IS_ADDR_LINKLOCAL(&address6->sin6_addr) ? 20 : 10);
+            if (address6->sin6_scope_id != 0)
+            {
+                const size_t used = std::strlen(addressText);
+                if (used + 2 < sizeof(addressText))
+                {
+                    char interfaceName[IF_NAMESIZE] = {};
+                    if (if_indextoname(address6->sin6_scope_id, interfaceName) != NULL)
+                        std::snprintf(addressText + used, sizeof(addressText) - used, "%%%s", interfaceName);
+                    else
+                        std::snprintf(addressText + used, sizeof(addressText) - used, "%%%u",
+                                      address6->sin6_scope_id);
+                }
+            }
+        }
+        else
+        {
+            SDL_LogCritical(SDL_LOG_CATEGORY_APPLICATION,
+                            "[netplay/discovery] Bonjour address ignored family=%d bytes=%lu",
+                            (int)address->sa_family, (unsigned long)[addressData length]);
+            continue;
+        }
+
+        SDL_LogCritical(SDL_LOG_CATEGORY_APPLICATION,
+                        "[netplay/discovery] Bonjour address candidate family=%s host=%s rank=%d",
+                        familyText, addressText, rank);
+        if (rank < selectedRank)
+        {
+            [selectedHost release];
+            selectedHost = [[NSString alloc] initWithUTF8String:addressText];
+            selectedRank = rank;
         }
     }
-    if (addressText[0] != '\0')
+
+    NSString *resolvedName = [service hostName];
+    if ((selectedHost == nil || selectedRank >= 30) && [resolvedName length] > 0)
+    {
+        [selectedHost release];
+        selectedHost = [resolvedName copy];
+        selectedRank = 25;
+        SDL_LogCritical(SDL_LOG_CATEGORY_APPLICATION,
+                        "[netplay/discovery] Bonjour using hostname fallback host=%s",
+                        [selectedHost UTF8String]);
+    }
+
+    if (selectedHost != nil && [service port] > 0)
     {
         @synchronized(self)
         {
             [_resolvedHost release];
-            _resolvedHost = [[NSString alloc] initWithUTF8String:addressText];
+            _resolvedHost = [selectedHost copy];
             _resolvedPort = [service port];
         }
-        SDL_Log("[netplay/discovery] Bonjour resolved host=%s port=%ld", addressText, (long)[service port]);
+        SDL_LogCritical(SDL_LOG_CATEGORY_APPLICATION,
+                        "[netplay/discovery] Bonjour resolved selectedHost=%s port=%ld rank=%d",
+                        [selectedHost UTF8String], (long)[service port], selectedRank);
     }
+    else
+    {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                     "[netplay/discovery] Bonjour resolved but no usable endpoint name=%s hostName=%s port=%ld addresses=%lu",
+                     [[service name] UTF8String], [resolvedName UTF8String], (long)[service port],
+                     (unsigned long)[[service addresses] count]);
+    }
+    [selectedHost release];
     @synchronized(self)
     {
+        [service setDelegate:nil];
         [_resolvingServices removeObject:service];
     }
 }
@@ -209,6 +296,42 @@ static NSNetService *g_TH06BonjourHostService = nil;
         _resolvedPort = 0;
         return YES;
     }
+}
+
+@end
+
+@implementation TH06BonjourHostPublisherDelegate
+
+- (void)netServiceWillPublish:(NSNetService *)service
+{
+    SDL_LogCritical(SDL_LOG_CATEGORY_APPLICATION,
+                    "[netplay/discovery] Bonjour host publication starting name=%s type=%s domain=%s port=%ld",
+                    [[service name] UTF8String], [[service type] UTF8String],
+                    [[service domain] UTF8String], (long)[service port]);
+}
+
+- (void)netServiceDidPublish:(NSNetService *)service
+{
+    SDL_LogCritical(SDL_LOG_CATEGORY_APPLICATION,
+                    "[netplay/discovery] Bonjour host publication succeeded name=%s type=%s domain=%s port=%ld",
+                    [[service name] UTF8String], [[service type] UTF8String],
+                    [[service domain] UTF8String], (long)[service port]);
+}
+
+- (void)netService:(NSNetService *)service didNotPublish:(NSDictionary *)errorDict
+{
+    NSNumber *domain = [errorDict objectForKey:NSNetServicesErrorDomain];
+    NSNumber *code = [errorDict objectForKey:NSNetServicesErrorCode];
+    SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                 "[netplay/discovery] Bonjour host publication failed name=%s domain=%ld code=%ld",
+                 [[service name] UTF8String], (long)[domain integerValue], (long)[code integerValue]);
+}
+
+- (void)netServiceDidStop:(NSNetService *)service
+{
+    SDL_LogCritical(SDL_LOG_CATEGORY_APPLICATION,
+                    "[netplay/discovery] Bonjour host publication stopped name=%s",
+                    [[service name] UTF8String]);
 }
 
 @end
@@ -249,13 +372,18 @@ extern "C" void TH06_IOS_StartBonjourHost(int port)
     if (port <= 0 || port > 65535) return;
     dispatch_async(dispatch_get_main_queue(), ^{
         [g_TH06BonjourHostService stop];
+        [g_TH06BonjourHostService setDelegate:nil];
         [g_TH06BonjourHostService release];
+        if (g_TH06BonjourHostDelegate == nil)
+            g_TH06BonjourHostDelegate = [[TH06BonjourHostPublisherDelegate alloc] init];
         g_TH06BonjourHostService = [[NSNetService alloc] initWithDomain:@"local."
                                                                   type:@"_th06-netplay._udp."
                                                                   name:[[UIDevice currentDevice] name]
                                                                   port:port];
+        [g_TH06BonjourHostService setDelegate:g_TH06BonjourHostDelegate];
         [g_TH06BonjourHostService publish];
-        SDL_Log("[netplay/discovery] Bonjour host published port=%d", port);
+        SDL_LogCritical(SDL_LOG_CATEGORY_APPLICATION,
+                        "[netplay/discovery] Bonjour host publication requested port=%d", port);
     });
 }
 
@@ -263,6 +391,7 @@ extern "C" void TH06_IOS_StopBonjourHost()
 {
     dispatch_async(dispatch_get_main_queue(), ^{
         [g_TH06BonjourHostService stop];
+        [g_TH06BonjourHostService setDelegate:nil];
         [g_TH06BonjourHostService release];
         g_TH06BonjourHostService = nil;
     });

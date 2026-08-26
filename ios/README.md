@@ -24,12 +24,12 @@ remote Mac desktop:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\ios\build_on_mac.ps1 `
-  -MacHost 10.0.0.142 -MacUser dick -IosVersion 1.2.5 -IosBuild 20
+  -MacHost 10.0.0.142 -MacUser dick -IosVersion 1.2.5 -IosBuild 22
 ```
 
 The remote builder uses the `th07_mac` OpenSSH key by default, creates a
 unique temporary run directory under `~/th06-build`, validates the IPA, then
-atomically installs it as `~/Desktop/th06-ios-1.2.5-20-<commit>.ipa`. Source
+atomically installs it as `~/Desktop/th06-ios-1.2.5-22-<commit>.ipa`. Source
 archives, Xcode/CMake build directories, and temporary extraction files are
 removed from the Mac after success or failure. A failed build leaves only
 diagnostic logs under the local `dist/mac-build` directory.
@@ -38,7 +38,7 @@ diagnostic logs under the local `dist/mac-build` directory.
 different lawful game data set should be packaged.
 
 The result is a uniquely named IPA such as
-`build-ios/th06-ios-1.2.5-20.ipa`. Install it with TrollStore. The bundle
+`build-ios/th06-ios-1.2.5-22.ipa`. Install it with TrollStore. The bundle
 identifier is `com.th06.sdl2.ios`; save/config/replay files are written under
 the app's iOS data container via `SDL_GetPrefPath`.
 
@@ -75,7 +75,7 @@ packages the 17 BGM tracks as OGG. The source validator rejects stale WAV files
 so a reused build directory cannot silently produce a 300+ MiB IPA again.
 It also forces GLES 2.0-compatible clamp sampling for the 640x480 JPEG surfaces
 and draws them as opaque framebuffer copies. The build script performs a clean
-build by default and rejects binaries that do not contain the 3.9.0 netplay UI
+build by default and rejects binaries that do not contain the 3.9.1 netplay UI
 marker. In remote netplay, gameplay dragging uses the same pixel-displacement
 touch path as single-player. Pause and retry choices accept a direct single
 tap; guest confirmation is sent only after the host acknowledges the selected

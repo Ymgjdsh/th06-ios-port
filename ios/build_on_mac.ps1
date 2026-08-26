@@ -7,7 +7,7 @@ param(
     [string]$RemoteFolder = "th06-build",
     [string]$XcodeApp = "/Applications/Xcode.app",
     [string]$IosVersion = "1.2.5",
-    [int]$IosBuild = 20,
+    [int]$IosBuild = 22,
     [switch]$OverwriteDesktop
 )
 
