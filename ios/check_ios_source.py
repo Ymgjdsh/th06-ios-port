@@ -59,10 +59,10 @@ def main() -> int:
     main_source = read("src/main.cpp")
 
     markers = (
-        ("iOS version", cmake, 'TH06_IOS_VERSION "1.3.0"'),
-        ("iOS build", cmake, 'TH06_IOS_BUILD "23"'),
-        ("build script version", build, "IOS_VERSION=${IOS_VERSION:-1.3.0}"),
-        ("build script build", build, "IOS_BUILD=${IOS_BUILD:-23}"),
+        ("iOS version", cmake, 'TH06_IOS_VERSION "1.3.1"'),
+        ("iOS build", cmake, 'TH06_IOS_BUILD "24"'),
+        ("build script version", build, "IOS_VERSION=${IOS_VERSION:-1.3.1}"),
+        ("build script build", build, "IOS_BUILD=${IOS_BUILD:-24}"),
         ("stable lockstep default", cmake,
          'TH06_ENABLE_PREDICTION_ROLLBACK "编译预测回滚联机代码" OFF'),
         ("stable lockstep iOS build", build, "-DTH06_ENABLE_PREDICTION_ROLLBACK=OFF"),
@@ -149,6 +149,10 @@ def main() -> int:
         ("Endless Practice entry", main_menu, "EndlessMode::ConfigurePracticeDifficultyMenu"),
         ("Endless bullet safety radius", endless, "kSafeSpawnDistance = 120.0f"),
         ("Endless density cap", endless, "kBulletSoftCap = 460"),
+        ("Endless initialized bullet type bound", endless, "kBulletTypeCount = 10"),
+        ("Endless safe bullet type pool", endless,
+         "static constexpr i16 sprites[] = {0, 1, 2, 4, 5, 7, 8};"),
+        ("Endless pattern validation", endless, "IsSafePattern(props)"),
         ("Endless survival scoring", endless, "g_GameManager.AddScore(5)"),
         ("Boss effect color bound", ecl, "EFFECT_COLOR_COUNT = 28"),
         ("lazy iOS sound-effect state", sound, "g_IosSoundLoadAttempted"),
@@ -188,6 +192,7 @@ def main() -> int:
         ("verbose default iOS logging", main_source,
          "SDL_LOG_PRIORITY_VERBOSE"),
         ("duplicate LAN listen-port field", menu, "##online_listen_port"),
+        ("removed Endless gameplay HUD", endless, "无尽 ENDLESS"),
     )
     for label, text, marker in forbidden_markers:
         if marker in text:

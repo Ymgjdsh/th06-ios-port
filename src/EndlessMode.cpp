@@ -16,7 +16,6 @@
 #include <SDL.h>
 #include <algorithm>
 #include <cmath>
-#include <cstdio>
 #include <imgui.h>
 
 namespace th06::EndlessMode
@@ -26,6 +25,8 @@ namespace
 constexpr u32 kWarmupFrames = 3 * 60;
 constexpr u32 kRampFrames = 5 * 60 * 60;
 constexpr i32 kBulletSoftCap = 460;
+constexpr i16 kBulletTypeCount = 10;
+constexpr i16 kSafeColorCount = 8;
 constexpr f32 kSafeSpawnDistance = 120.0f;
 constexpr f32 kSafeSpawnDistanceSq = kSafeSpawnDistance * kSafeSpawnDistance;
 
@@ -127,12 +128,23 @@ i32 IntensityTier()
 
 void FinishProps(EnemyBulletShooter &props, i32 family, bool slow)
 {
-    static const i16 sprites[] = {0, 1, 2, 4, 5, 7, 8, 10};
+    // BulletManager only initializes templates 0..9. Keep this list explicit so
+    // an invalid type can never dereference an uninitialized template sprite.
+    static constexpr i16 sprites[] = {0, 1, 2, 4, 5, 7, 8};
     props.sprite = sprites[(family + RandomInt(3)) % (i32)(sizeof(sprites) / sizeof(sprites[0]))];
-    props.spriteOffset = (i16)RandomInt(8);
+    props.spriteOffset = (i16)RandomInt(kSafeColorCount);
     props.flags = (slow ? 8u : 4u) | 0x200u;
     props.provokedPlayer = 1;
     props.sfx = SOUND_SHOOT_BOSS;
+}
+
+bool IsSafePattern(const EnemyBulletShooter &props)
+{
+    return props.sprite >= 0 && props.sprite < kBulletTypeCount && props.spriteOffset >= 0 &&
+           props.spriteOffset < kSafeColorCount && props.count1 > 0 && props.count2 > 0 &&
+           props.aimMode <= RANDOM && std::isfinite(props.position.x) && std::isfinite(props.position.y) &&
+           std::isfinite(props.angle1) && std::isfinite(props.angle2) && std::isfinite(props.speed1) &&
+           std::isfinite(props.speed2);
 }
 
 void EmitBurst(i32 family, i32 step, i32 total, f32 intensity)
@@ -225,6 +237,14 @@ void EmitBurst(i32 family, i32 step, i32 total, f32 intensity)
     }
     }
 
+    if (!IsSafePattern(props))
+    {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                     "[Endless] rejected unsafe pattern family=%d sprite=%d color=%d count=%dx%d aim=%u",
+                     family, props.sprite, props.spriteOffset, props.count1, props.count2,
+                     (unsigned)props.aimMode);
+        return;
+    }
     g_BulletManager.SpawnBulletPattern(&props);
 }
 
@@ -254,6 +274,8 @@ void BeginWave()
     const i32 tier = IntensityTier();
     g_State.family = ChooseFamily();
     g_State.side = RandomInt(2);
+    SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "[Endless] wave family=%d tier=%d bullets=%d", g_State.family,
+                tier, g_BulletManager.bulletCount);
 
     switch (g_State.family)
     {
@@ -465,18 +487,5 @@ void DrawImGuiOverlay()
         draw->AddText(ImVec2(left + 14.0f, top + 30.0f), detail, "随机弹幕  生存 +5分/秒");
     }
 
-    if (g_State.active)
-    {
-        const u32 seconds = g_State.elapsedFrames / 60;
-        char line[96];
-        std::snprintf(line, sizeof(line), "无尽 ENDLESS   %02u:%02u   强度 %d/6",
-                      (unsigned)(seconds / 60), (unsigned)(seconds % 60), IntensityTier());
-        const ImVec2 textSize = ImGui::CalcTextSize(line);
-        const ImVec2 min(42.0f, 24.0f);
-        const ImVec2 max(min.x + textSize.x + 18.0f, min.y + textSize.y + 12.0f);
-        draw->AddRectFilled(min, max, IM_COL32(0, 0, 0, 150));
-        draw->AddRect(min, max, IM_COL32(255, 220, 130, 165));
-        draw->AddText(ImVec2(min.x + 9.0f, min.y + 6.0f), IM_COL32(255, 238, 180, 255), line);
-    }
 }
 } // namespace th06::EndlessMode
