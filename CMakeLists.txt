@@ -38,8 +38,8 @@ set(CMAKE_CXX_STANDARD 17)
 
 # Option: build with OpenGL ES 2.0 shader-based renderer instead of fixed-function GL
 option(USE_GLES "Build with OpenGL ES 2.0 renderer (RendererGLES) instead of fixed-function RendererGL" OFF)
-set(TH06_IOS_VERSION "1.2.5" CACHE STRING "iOS marketing version")
-set(TH06_IOS_BUILD "22" CACHE STRING "iOS build number")
+set(TH06_IOS_VERSION "1.3.0" CACHE STRING "iOS marketing version")
+set(TH06_IOS_BUILD "23" CACHE STRING "iOS build number")
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # ============================================================================
@@ -221,6 +221,7 @@ set(TH06_GAME_SOURCES
     src/EclManager.cpp
     src/EffectManager.cpp
     src/Ending.cpp
+    src/EndlessMode.cpp
     src/EnemyEclInstr.cpp
     src/EnemyManager.cpp
     src/AssetIO.cpp

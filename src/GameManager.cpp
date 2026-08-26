@@ -4,6 +4,7 @@
 #include "ChainPriorities.hpp"
 #include "EclManager.hpp"
 #include "EffectManager.hpp"
+#include "EndlessMode.hpp"
 #include "EnemyManager.hpp"
 #include "GameWindow.hpp"
 #include "Gui.hpp"
@@ -422,6 +423,14 @@ ZunResult GameManager::AddedCallback(GameManager *mgr)
     const bool allowPracticeWarpHooks = !suppressPracticeWarpHooks && g_GameManager.isInReplay == 0;
     i32 padding[3];
 
+    if (EndlessMode::IsSelected() &&
+        (!mgr->isInPracticeMode || mgr->isInReplay || Session::IsDualPlayerSession()))
+    {
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                    "[Endless] rejected outside local single-player Practice Start");
+        EndlessMode::SetSelected(false);
+    }
+
     failedToLoadReplay = false;
     if (g_Supervisor.curState != SUPERVISOR_STATE_GAMEMANAGER_REINIT)
     {
@@ -481,13 +490,18 @@ ZunResult GameManager::AddedCallback(GameManager *mgr)
         ResultScreen::ParseCatk(scoredat, mgr->catk);
         ResultScreen::ParseClrd(scoredat, mgr->clrd);
         ResultScreen::ParsePscr(scoredat, (Pscr *)mgr->pscr);
-        if (mgr->isInPracticeMode != 0)
+        if (mgr->isInPracticeMode != 0 && !EndlessMode::IsSelected())
         {
             g_GameManager.highScore =
                 mgr->pscr[g_GameManager.CharacterShotType()][g_GameManager.currentStage][g_GameManager.difficulty]
                     .score;
         }
         ResultScreen::ReleaseScoreDat(scoredat);
+        if (EndlessMode::IsSelected())
+        {
+            mgr->highScore = 0;
+            mgr->extraLives = 0xff;
+        }
         mgr->rank = g_DifficultyInfo[g_GameManager.difficulty].rank;
         mgr->minRank = g_DifficultyInfo[g_GameManager.difficulty].minRank;
         mgr->maxRank = g_DifficultyInfo[g_GameManager.difficulty].maxRank;
@@ -513,7 +527,7 @@ ZunResult GameManager::AddedCallback(GameManager *mgr)
     mgr->grazeInStage = 0;
     mgr->isInGameMenu = 0;
     mgr->currentStage = mgr->currentStage + 1;
-    if (g_GameManager.isInReplay == 0)
+    if (g_GameManager.isInReplay == 0 && !EndlessMode::IsSelected())
     {
         clrdIdx = g_GameManager.CharacterShotType();
         if (mgr->numRetries == 0 &&
@@ -618,26 +632,40 @@ ZunResult GameManager::AddedCallback(GameManager *mgr)
     iosGameBootPhase("bullet complete");
     PresentIosLoadingProgress(0.66f, "bullets complete");
     iosGameBootPhase("enemy begin");
-    if (EnemyManager::RegisterChain(g_AnmStageFiles[mgr->currentStage].file1,
-                                    g_AnmStageFiles[mgr->currentStage].file2) != ZUN_SUCCESS)
+    if (EndlessMode::IsSelected())
     {
-        GameErrorContext::Log(&g_GameErrorContext, TH_ERR_GAMEMANAGER_FAILED_TO_INITIALIZE_ENEMYMANAGER);
-        return ZUN_ERROR;
+        if (EndlessMode::RegisterChain() != ZUN_SUCCESS)
+        {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "[Endless] failed to register pattern director");
+            return ZUN_ERROR;
+        }
+        SDL_LogCritical(SDL_LOG_CATEGORY_APPLICATION,
+                        "[Endless] active: stage=1 warmup=180 cap=460 ramp=18000");
+    }
+    else
+    {
+        if (EnemyManager::RegisterChain(g_AnmStageFiles[mgr->currentStage].file1,
+                                        g_AnmStageFiles[mgr->currentStage].file2) != ZUN_SUCCESS)
+        {
+            GameErrorContext::Log(&g_GameErrorContext, TH_ERR_GAMEMANAGER_FAILED_TO_INITIALIZE_ENEMYMANAGER);
+            return ZUN_ERROR;
+        }
+        SDL_PumpEvents();
+        iosGameBootPhase("ECL begin");
+        if (g_EclManager.Load(g_EclFiles[mgr->currentStage]) != ZUN_SUCCESS)
+        {
+            GameErrorContext::Log(&g_GameErrorContext, TH_ERR_GAMEMANAGER_FAILED_TO_INITIALIZE_ECLMANAGER);
+            return ZUN_ERROR;
+        }
+        // Apply ECL patches for practice mode warps (must be after ECL is loaded)
+        if (allowPracticeWarpHooks)
+        {
+            THPrac::TH06::THPracPostEclLoad();
+        }
     }
     SDL_PumpEvents();
     iosGameBootPhase("enemy complete");
-    PresentIosLoadingProgress(0.76f, "enemies complete");
-    iosGameBootPhase("ECL begin");
-    if (g_EclManager.Load(g_EclFiles[mgr->currentStage]) != ZUN_SUCCESS)
-    {
-        GameErrorContext::Log(&g_GameErrorContext, TH_ERR_GAMEMANAGER_FAILED_TO_INITIALIZE_ECLMANAGER);
-        return ZUN_ERROR;
-    }
-    // Apply ECL patches for practice mode warps (must be after ECL is loaded)
-    if (allowPracticeWarpHooks)
-    {
-        THPrac::TH06::THPracPostEclLoad();
-    }
+    PresentIosLoadingProgress(0.76f, EndlessMode::IsSelected() ? "endless ready" : "enemies complete");
     iosGameBootPhase("ECL complete");
     PresentIosLoadingProgress(0.84f, "scripts complete");
     iosGameBootPhase("effects and GUI begin");
@@ -656,7 +684,7 @@ ZunResult GameManager::AddedCallback(GameManager *mgr)
     {
         THPrac::TH06::THPracPostGuiInit();
     }
-    if (g_GameManager.isInReplay == 0)
+    if (g_GameManager.isInReplay == 0 && !EndlessMode::IsSelected())
     {
         ReplayManager::RegisterChain(0, "replay/th6_00.rpy");
     }
@@ -711,6 +739,7 @@ ZunResult GameManager::DeletedCallback(GameManager *mgr)
         g_Supervisor.StopAudio();
     }
     Stage::CutChain();
+    EndlessMode::CutChain();
     BulletManager::CutChain();
     Player::CutChain();
     EnemyManager::CutChain();

@@ -4,8 +4,8 @@ set -eu
 ROOT_DIR=$(cd "$(dirname "$0")/.." && pwd)
 BUILD_DIR=${BUILD_DIR:-"$ROOT_DIR/build-ios"}
 CONFIG=${CONFIG:-Release}
-IOS_VERSION=${IOS_VERSION:-1.2.5}
-IOS_BUILD=${IOS_BUILD:-22}
+IOS_VERSION=${IOS_VERSION:-1.3.0}
+IOS_BUILD=${IOS_BUILD:-23}
 OUTPUT_IPA=${OUTPUT_IPA:-"$ROOT_DIR/build-ios/th06-ios-${IOS_VERSION}-${IOS_BUILD}.ipa"}
 BGM_DIR=${BGM_DIR:-"$ROOT_DIR/ios/bgm"}
 

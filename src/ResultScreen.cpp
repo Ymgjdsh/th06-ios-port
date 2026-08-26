@@ -7,6 +7,7 @@
 #include "Chain.hpp"
 #include "ChainPriorities.hpp"
 #include "Controller.hpp"
+#include "EndlessMode.hpp"
 #include "FileSystem.hpp"
 #include "GameManager.hpp"
 #include "GamePaths.hpp"
@@ -2645,7 +2646,7 @@ ZunResult ResultScreen::AddedCallback(ResultScreen *resultScreen)
         ParsePscr(resultScreen->scoreDat, (Pscr *)g_GameManager.pscr);
     }
 
-    if (resultScreen->resultScreenState == RESULT_SCREEN_STATE_EXIT &&
+    if (resultScreen->resultScreenState == RESULT_SCREEN_STATE_EXIT && !EndlessMode::IsSelected() &&
         g_GameManager.pscr[g_GameManager.CharacterShotType()][g_GameManager.currentStage - 1][g_GameManager.difficulty]
                 .score < g_GameManager.score)
     {

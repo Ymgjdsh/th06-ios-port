@@ -15,6 +15,7 @@
 #include "AnmManager.hpp"
 #include "AsciiManager.hpp"
 #include "ChainPriorities.hpp"
+#include "EndlessMode.hpp"
 #include "Filesystem.hpp"
 #include "GameErrorContext.hpp"
 #include "GameManager.hpp"
@@ -585,7 +586,7 @@ ChainCallbackResult MainMenu::OnUpdate(MainMenu *menu)
                 {
                     menu->vm[i].pendingInterrupt = 6;
                 }
-                menu->cursor = g_Supervisor.cfg.defaultDifficulty;
+                menu->cursor = EndlessMode::IsSelected() ? 4 : g_Supervisor.cfg.defaultDifficulty;
             }
             else
             {
@@ -611,8 +612,9 @@ ChainCallbackResult MainMenu::OnUpdate(MainMenu *menu)
         vmList = &menu->vm[81];
         if (g_GameManager.difficulty < 4)
         {
-            MoveCursor(menu, 4);
-            for (i = 0; i < 4; i++, vmList++)
+            MoveCursor(menu, (g_GameManager.isInPracticeMode && !Session::IsDualPlayerSession()) ? 5 : 4);
+            for (i = 0; i < ((g_GameManager.isInPracticeMode && !Session::IsDualPlayerSession()) ? 5 : 4);
+                 i++, vmList++)
             {
                 if (i != menu->cursor)
                 {
@@ -646,7 +648,10 @@ ChainCallbackResult MainMenu::OnUpdate(MainMenu *menu)
                     memcpy(vmList->posOffset, &pos2, sizeof(D3DXVECTOR3));
                 }
             }
-            vmList->flags.flag1 = 0;
+            if (!g_GameManager.isInPracticeMode || Session::IsDualPlayerSession())
+            {
+                menu->vm[85].flags.flag1 = 0;
+            }
         }
         else
         {
@@ -670,10 +675,13 @@ ChainCallbackResult MainMenu::OnUpdate(MainMenu *menu)
                 memcpy(vmList->posOffset, &pos3, sizeof(D3DXVECTOR3));
             }
         }
+        EndlessMode::ConfigurePracticeDifficultyMenu(menu);
         // Touch: tap on a difficulty item to select it directly.
         if (AndroidTouchInput::IsEnabled() || AndroidTouchInput::HasPendingTouchData())
         {
-            int diffCount = (g_GameManager.difficulty < 4) ? 4 : 1;
+            int diffCount = (g_GameManager.difficulty < 4)
+                                ? ((g_GameManager.isInPracticeMode && !Session::IsDualPlayerSession()) ? 5 : 4)
+                                : 1;
             AnmVm *diffStart = (g_GameManager.difficulty < 4) ? &menu->vm[81] : &menu->vm[85];
             AndroidTouchInput::TryTouchSelect(diffStart, diffCount, menu->cursor);
         }
@@ -688,7 +696,10 @@ ChainCallbackResult MainMenu::OnUpdate(MainMenu *menu)
             g_SoundPlayer.PlaySoundByIdx(SOUND_BACK, 0);
             if (g_GameManager.difficulty < 4)
             {
-                g_Supervisor.cfg.defaultDifficulty = menu->cursor;
+                if (!EndlessMode::IsSelected())
+                {
+                    g_Supervisor.cfg.defaultDifficulty = menu->cursor;
+                }
                 if (g_GameManager.isInPracticeMode == 0)
                 {
                     menu->cursor = 0;
@@ -702,6 +713,7 @@ ChainCallbackResult MainMenu::OnUpdate(MainMenu *menu)
             {
                 menu->cursor = 1;
             }
+            EndlessMode::SetSelected(false);
             break;
         }
         else if (WAS_PRESSED(TH_BUTTON_SELECTMENU))
@@ -717,7 +729,16 @@ ChainCallbackResult MainMenu::OnUpdate(MainMenu *menu)
             {
                 vmList = &menu->vm[81 + menu->cursor];
                 vmList->pendingInterrupt = 8;
-                g_GameManager.difficulty = (Difficulty)menu->cursor;
+                if (g_GameManager.isInPracticeMode && menu->cursor == 4 && !Session::IsDualPlayerSession())
+                {
+                    EndlessMode::SetSelected(true);
+                    g_GameManager.difficulty = LUNATIC;
+                }
+                else
+                {
+                    EndlessMode::SetSelected(false);
+                    g_GameManager.difficulty = (Difficulty)menu->cursor;
+                }
                 menu->cursor = g_GameManager.character;
             }
             else
@@ -725,6 +746,7 @@ ChainCallbackResult MainMenu::OnUpdate(MainMenu *menu)
                 vmList = &menu->vm[85];
                 vmList->pendingInterrupt = 8;
                 g_GameManager.difficulty = EXTRA;
+                EndlessMode::SetSelected(false);
                 if (g_GameManager.HasReachedMaxClears(g_GameManager.character, 0) ||
                     g_GameManager.HasReachedMaxClears(g_GameManager.character, 1))
                 {
@@ -735,7 +757,10 @@ ChainCallbackResult MainMenu::OnUpdate(MainMenu *menu)
                     menu->cursor = 1 - g_GameManager.character;
                 }
             }
-            g_Supervisor.cfg.defaultDifficulty = g_GameManager.difficulty;
+            if (!EndlessMode::IsSelected())
+            {
+                g_Supervisor.cfg.defaultDifficulty = g_GameManager.difficulty;
+            }
             vmList = &menu->vm[86];
             for (i = 0; i < 2; i++, vmList += 2)
             {
@@ -834,7 +859,7 @@ ChainCallbackResult MainMenu::OnUpdate(MainMenu *menu)
                 {
                     menu->vm[i].pendingInterrupt = 6;
                 }
-                menu->cursor = g_Supervisor.cfg.defaultDifficulty;
+                menu->cursor = EndlessMode::IsSelected() ? 4 : g_Supervisor.cfg.defaultDifficulty;
             }
             else
             {
@@ -1008,7 +1033,7 @@ ChainCallbackResult MainMenu::OnUpdate(MainMenu *menu)
                     vmList[1].pendingInterrupt = 0;
                 }
             }
-            vmList = &menu->vm[81 + g_GameManager.difficulty];
+            vmList = EndlessMode::IsSelected() ? &menu->vm[85] : &menu->vm[81 + g_GameManager.difficulty];
             vmList->pendingInterrupt = 0;
             g_SoundPlayer.PlaySoundByIdx(SOUND_BACK, 0);
             g_GameManager.shotType = menu->cursor;
@@ -1076,6 +1101,11 @@ ChainCallbackResult MainMenu::OnUpdate(MainMenu *menu)
                 }
                 break;
             }
+            if (EndlessMode::IsSelected())
+            {
+                g_GameManager.currentStage = 0;
+                goto something;
+            }
             if (g_GameManager.isInPracticeMode == 0)
             {
                 if (g_GameManager.difficulty < 4)
@@ -1113,6 +1143,11 @@ ChainCallbackResult MainMenu::OnUpdate(MainMenu *menu)
                         g_GameManager.livesRemaining2 = 8;
                         g_GameManager.bombsRemaining2 = 8;
                     }
+                }
+                if (EndlessMode::IsSelected())
+                {
+                    g_GameManager.livesRemaining = 0;
+                    g_GameManager.bombsRemaining = 0;
                 }
                 g_Supervisor.curState = 2;
                 g_SoundPlayer.PlaySoundByIdx(SOUND_SELECT, 0);
@@ -1162,7 +1197,7 @@ ChainCallbackResult MainMenu::OnUpdate(MainMenu *menu)
             {
                 menu->vm[i].pendingInterrupt = 19;
             }
-            vmList = &menu->vm[81 + g_GameManager.difficulty];
+            vmList = EndlessMode::IsSelected() ? &menu->vm[85] : &menu->vm[81 + g_GameManager.difficulty];
             vmList->pendingInterrupt = 0;
             vmList = &menu->vm[86];
             for (i = 0; i < 2; i++, vmList += 2)
@@ -1938,6 +1973,7 @@ ZunResult MainMenu::DrawStartMenu(void)
             switch (this->cursor)
             {
             case 0:
+                EndlessMode::SetSelected(false);
                 for (i = 0; i < ARRAY_SIZE_SIGNED(this->vm); i++)
                 {
                     this->vm[i].pendingInterrupt = 4;
@@ -1960,6 +1996,7 @@ ZunResult MainMenu::DrawStartMenu(void)
                 g_SoundPlayer.PlaySoundByIdx(SOUND_SELECT, 0);
                 break;
             case 1:
+                EndlessMode::SetSelected(false);
                 if (!(!g_GameManager.HasReachedMaxClears(0, 0) && !g_GameManager.HasReachedMaxClears(0, 1) &&
                       !g_GameManager.HasReachedMaxClears(1, 0) && !g_GameManager.HasReachedMaxClears(1, 1)))
                 {
@@ -1983,6 +2020,7 @@ ZunResult MainMenu::DrawStartMenu(void)
                 }
                 break;
             case 2:
+                EndlessMode::SetSelected(false);
                 g_GameManager.isInPracticeMode = 1;
                 for (i = 0; i < ARRAY_SIZE_SIGNED(this->vm); i++)
                 {
@@ -3264,6 +3302,7 @@ ZunResult MainMenu::AddedCallback(MainMenu *m)
     }
 
     PortableGameplayRestore::OnMainMenuEntered();
+    EndlessMode::Reset();
 
     anmmgr = g_AnmManager;
 

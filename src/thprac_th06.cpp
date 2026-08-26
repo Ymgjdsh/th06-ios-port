@@ -27,6 +27,7 @@
 #include "thprac_gui_integration.h"
 #include "Gui.hpp"
 #include "EclManager.hpp"
+#include "EndlessMode.hpp"
 #include "AnmManager.hpp"
 #include "AstroBot.hpp"
 #include "MainMenu.hpp"
@@ -4681,6 +4682,7 @@ namespace TH06 {
         TH06Save::singleton().IncreaseGameTime();
 
         auto p = ImGui::GetOverlayDrawList();
+        th06::EndlessMode::DrawImGuiOverlay();
         RenderPlHitbox(ImGui::GetBackgroundDrawList());
         SSS::SSS_Update(6);
 
@@ -5050,6 +5052,7 @@ namespace TH06 {
         TH06Save::singleton().IncreaseGameTime();
 
         auto p = ImGui::GetOverlayDrawList();
+        th06::EndlessMode::DrawImGuiOverlay();
         RenderPlHitbox(ImGui::GetBackgroundDrawList());
         SSS::SSS_Update(6);
 

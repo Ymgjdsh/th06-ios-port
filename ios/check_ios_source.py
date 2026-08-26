@@ -50,6 +50,7 @@ def main() -> int:
     result = read("src/ResultScreen.cpp")
     replay = read("src/ReplayManager.cpp")
     main_menu = read("src/MainMenu.cpp")
+    endless = read("src/EndlessMode.cpp")
     ecl = read("src/EclManager.cpp")
     sound = read("src/SoundPlayer.cpp")
     zwave = read("src/zwave.cpp")
@@ -58,10 +59,10 @@ def main() -> int:
     main_source = read("src/main.cpp")
 
     markers = (
-        ("iOS version", cmake, 'TH06_IOS_VERSION "1.2.5"'),
-        ("iOS build", cmake, 'TH06_IOS_BUILD "22"'),
-        ("build script version", build, "IOS_VERSION=${IOS_VERSION:-1.2.5}"),
-        ("build script build", build, "IOS_BUILD=${IOS_BUILD:-22}"),
+        ("iOS version", cmake, 'TH06_IOS_VERSION "1.3.0"'),
+        ("iOS build", cmake, 'TH06_IOS_BUILD "23"'),
+        ("build script version", build, "IOS_VERSION=${IOS_VERSION:-1.3.0}"),
+        ("build script build", build, "IOS_BUILD=${IOS_BUILD:-23}"),
         ("stable lockstep default", cmake,
          'TH06_ENABLE_PREDICTION_ROLLBACK "编译预测回滚联机代码" OFF'),
         ("stable lockstep iOS build", build, "-DTH06_ENABLE_PREDICTION_ROLLBACK=OFF"),
@@ -144,6 +145,11 @@ def main() -> int:
         ("Replay file-size cap", replay, "kMaxReplayFileSize"),
         ("Replay diagnostics", replay, "[ReplayProbe]"),
         ("Replay selection null guard", main_menu, "currentReplay != NULL"),
+        ("Endless source", cmake, "src/EndlessMode.cpp"),
+        ("Endless Practice entry", main_menu, "EndlessMode::ConfigurePracticeDifficultyMenu"),
+        ("Endless bullet safety radius", endless, "kSafeSpawnDistance = 120.0f"),
+        ("Endless density cap", endless, "kBulletSoftCap = 460"),
+        ("Endless survival scoring", endless, "g_GameManager.AddScore(5)"),
         ("Boss effect color bound", ecl, "EFFECT_COLOR_COUNT = 28"),
         ("lazy iOS sound-effect state", sound, "g_IosSoundLoadAttempted"),
         ("BGM loop-end guard", zwave, "effectiveEnd == 0"),
