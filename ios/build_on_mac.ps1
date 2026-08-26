@@ -6,8 +6,8 @@ param(
     [string]$KeyPath = "$env:USERPROFILE\.ssh\th07_mac",
     [string]$RemoteFolder = "th06-build",
     [string]$XcodeApp = "/Applications/Xcode.app",
-    [string]$IosVersion = "1.3.2",
-    [int]$IosBuild = 25,
+    [string]$IosVersion = "1.3.3",
+    [int]$IosBuild = 26,
     [switch]$OverwriteDesktop
 )
 
@@ -74,6 +74,12 @@ $remoteRun = "$remoteBase/runs/$runId"
 $remoteSource = "$remoteRun/source"
 $remoteIpa = "$remoteRun/output/th06-ios-$IosVersion-$IosBuild.ipa"
 $remoteDesktop = "`$HOME/Desktop/$desktopName"
+$windowsDesktop = [Environment]::GetFolderPath("Desktop")
+if ([string]::IsNullOrWhiteSpace($windowsDesktop)) {
+    $windowsDesktop = Join-Path $env:USERPROFILE "Desktop"
+}
+$windowsDesktopIpa = Join-Path $windowsDesktop $desktopName
+$windowsDesktopTemp = "$windowsDesktopIpa.tmp"
 
 try {
     Write-Host "Checking SSH connection to $target ..."
@@ -149,6 +155,28 @@ shasum -a 256 "`$DESKTOP"
     & ssh @sshOptions $target $install
     if ($LASTEXITCODE -ne 0) { throw "Could not place the IPA on the Mac desktop." }
 
+    if (-not $OverwriteDesktop -and (Test-Path -LiteralPath $windowsDesktopIpa)) {
+        throw "Windows desktop output already exists: $windowsDesktopIpa. Use -OverwriteDesktop to replace it."
+    }
+    New-Item -ItemType Directory -Force -Path $windowsDesktop | Out-Null
+    Remove-Item -LiteralPath $windowsDesktopTemp -Force -ErrorAction SilentlyContinue
+    Write-Host "Copying verified IPA to the Windows desktop ..."
+    & scp @scpOptions "${target}:Desktop/$desktopName" $windowsDesktopTemp
+    if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $windowsDesktopTemp)) {
+        throw "Could not copy the IPA to the Windows desktop."
+    }
+    Move-Item -LiteralPath $windowsDesktopTemp -Destination $windowsDesktopIpa -Force
+    $windowsHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $windowsDesktopIpa).Hash.ToLowerInvariant()
+    $macHashLine = (& ssh @sshOptions $target "shasum -a 256 `"$remoteDesktop`"").Trim()
+    if ($LASTEXITCODE -ne 0 -or $macHashLine -notmatch '^[0-9a-fA-F]{64}\s') {
+        throw "Could not verify the Mac desktop IPA hash."
+    }
+    $macHash = ($macHashLine -split '\s+')[0].ToLowerInvariant()
+    if ($windowsHash -ne $macHash) {
+        throw "IPA hash mismatch between Mac and Windows desktops."
+    }
+    Write-Host "Verified SHA256: $windowsHash  $windowsDesktopIpa"
+
     Write-Host "Cleaning temporary source and build files on the Mac ..."
     & ssh @sshOptions $target "rm -rf `"$remoteRun`" `"$remoteBase/incoming/source-$runId.zip`""
     if ($LASTEXITCODE -ne 0) { throw "IPA is on the desktop, but remote cleanup failed: $remoteRun" }
@@ -160,4 +188,7 @@ finally {
     }
     Remove-Item -LiteralPath $archivePath -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath ($archivePath + ".sha256.txt") -Force -ErrorAction SilentlyContinue
+    if ($windowsDesktopTemp) {
+        Remove-Item -LiteralPath $windowsDesktopTemp -Force -ErrorAction SilentlyContinue
+    }
 }

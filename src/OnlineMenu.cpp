@@ -23,10 +23,10 @@ namespace
 {
 constexpr int kDefaultPort = 3036;
 constexpr int kDefaultDelay = 2;
-// Three frames absorb normal Wi-Fi scheduling jitter. Local touch movement is
-// still presented immediately, so this does not add three frames to the local
-// player's visible control response.
-constexpr int kNearbyDelay = 3;
+constexpr int kLanDelay = 2;
+// MultipeerConnectivity has more scheduling jitter than a direct UDP LAN path.
+// Keep its extra frame without forcing the same latency on Nearby LAN.
+constexpr int kBluetoothDelay = 3;
 constexpr float kFrameTimeMs = 1000.0f / 60.0f;
 
 struct State
@@ -363,7 +363,7 @@ void ClampState()
 {
     g_State.hostPort = std::clamp(g_State.hostPort, 1, 65535);
     g_State.listenPort = g_State.hostPort;
-    const int minimumDelay = (g_State.mode == 0 || g_State.mode == 3) ? kNearbyDelay : 1;
+    const int minimumDelay = g_State.mode == 3 ? kBluetoothDelay : 1;
     g_State.targetDelay = std::clamp(g_State.targetDelay, minimumDelay, 60);
     g_State.mode = std::clamp(g_State.mode, 0, 3);
 }
@@ -664,12 +664,12 @@ void UpdateImGui()
 
     const Netplay::Snapshot snapshot = Netplay::GetSnapshot();
     const Netplay::RelaySnapshot relaySnapshot = Netplay::GetRelaySnapshot();
-    const bool nearbyTransport = g_State.mode == 0 || g_State.mode == 3;
-    g_State.targetDelay = nearbyTransport ? std::max(snapshot.targetDelay, kNearbyDelay) : snapshot.targetDelay;
-    if (nearbyTransport && snapshot.targetDelay < kNearbyDelay)
+    const bool bluetoothTransport = g_State.mode == 3;
+    g_State.targetDelay = bluetoothTransport ? std::max(snapshot.targetDelay, kBluetoothDelay) : snapshot.targetDelay;
+    if (bluetoothTransport && snapshot.targetDelay < kBluetoothDelay)
     {
         // Migrate old installs that persisted the former one-frame setting.
-        Netplay::SetDelay(kNearbyDelay);
+        Netplay::SetDelay(kBluetoothDelay);
         g_State.dirty = true;
     }
     g_State.authoritativeModeEnabled = false;
@@ -710,8 +710,9 @@ void UpdateImGui()
                 g_State.mode = i;
                 if (i == 0 || i == 3)
                 {
-                    g_State.targetDelay = kNearbyDelay;
-                    Netplay::SetDelay(kNearbyDelay);
+                    const int transportDelay = i == 3 ? kBluetoothDelay : kLanDelay;
+                    g_State.targetDelay = transportDelay;
+                    Netplay::SetDelay(transportDelay);
                 }
                 g_State.dirty = true;
                 if (i != 0) Netplay::CancelLanDiscovery();
@@ -796,10 +797,10 @@ void UpdateImGui()
             // local socket. Guests on another device can use the same number.
             g_State.listenPort = g_State.hostPort;
         }
-        if (g_State.mode == 0 || g_State.mode == 3)
+        if (g_State.mode == 3)
         {
-            g_State.targetDelay = kNearbyDelay;
-            Netplay::SetDelay(kNearbyDelay);
+            g_State.targetDelay = kBluetoothDelay;
+            Netplay::SetDelay(kBluetoothDelay);
         }
         std::string error;
         bool ok = g_State.mode == 3 ? Netplay::BeginBluetooth(true, &error)
@@ -816,10 +817,10 @@ void UpdateImGui()
         }
         else
         {
-            if (g_State.mode == 0 || g_State.mode == 3)
+            if (g_State.mode == 3)
             {
-                g_State.targetDelay = kNearbyDelay;
-                Netplay::SetDelay(kNearbyDelay);
+                g_State.targetDelay = kBluetoothDelay;
+                Netplay::SetDelay(kBluetoothDelay);
             }
             std::string error;
             bool ok = g_State.mode == 3 ? Netplay::BeginBluetooth(false, &error)
@@ -845,8 +846,8 @@ void UpdateImGui()
     ImGui::TextUnformatted(Tr("会话参数", "Session settings", "セッション設定"));
     ImGui::TextUnformatted(GetTargetDelayLabel());
     ImGui::SameLine(110.0f);
-    const bool nearbyDelayLocked = g_State.mode == 0 || g_State.mode == 3;
-    if (snapshot.delayLocked || nearbyDelayLocked)
+    const bool transportDelayLocked = g_State.mode == 3;
+    if (snapshot.delayLocked || transportDelayLocked)
     {
         ImGui::BeginDisabled();
     }
@@ -877,7 +878,7 @@ void UpdateImGui()
     {
         ImGui::EndDisabled();
     }
-    if (snapshot.delayLocked || nearbyDelayLocked)
+    if (snapshot.delayLocked || transportDelayLocked)
     {
         ImGui::EndDisabled();
     }

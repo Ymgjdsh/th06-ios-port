@@ -35,6 +35,9 @@ struct LanDiscoveryState
     bool foundAny = false;
     bool permissionReady = false;
     bool permissionFallbackLogged = false;
+    bool hasFallbackCandidate = false;
+    Uint64 fallbackReadyTick = 0;
+    LanDiscoveryResult fallbackCandidate;
     std::deque<LanDiscoveryResult> results;
 };
 
@@ -43,6 +46,17 @@ LanDiscoveryState g_LanDiscovery;
 constexpr Uint64 kLanDiscoveryDurationMs = 10000;
 constexpr Uint64 kLanDiscoveryBroadcastIntervalMs = 750;
 constexpr Uint64 kLanDiscoveryPermissionGraceMs = 5000;
+constexpr Uint64 kLanDiscoveryBonjourFallbackGraceMs = 1000;
+
+bool IsIpv4LinkLocalAddress(const std::string &ip)
+{
+    in_addr address {};
+    if (inet_pton(AF_INET, ip.c_str(), &address) != 1)
+    {
+        return false;
+    }
+    return (ntohl(address.s_addr) & 0xffff0000u) == 0xa9fe0000u;
+}
 
 int SendLanDiscoveryBroadcasts()
 {
@@ -235,34 +249,23 @@ void TickLanDiscoveryInternal()
         }
     }
 
-    if (now >= g_LanDiscovery.deadlineTick)
-    {
-        SDL_Log("[netplay/discovery] timed out after %d broadcast attempts on UDP %d",
-                g_LanDiscovery.broadcastAttempts, g_LanDiscovery.hostPort);
-        CloseLanDiscoverySocket();
-        SetStatus("no LAN host found");
-        return;
-    }
-
     char bonjourHost[128] = {};
     int bonjourPort = 0;
     if (TH06_IOS_PollBonjourHost(bonjourHost, (int)sizeof(bonjourHost), &bonjourPort) &&
         bonjourHost[0] != '\0' && bonjourPort > 0)
     {
-        LanDiscoveryResult result;
-        result.hostIp = bonjourHost;
-        result.hostPort = bonjourPort;
-        result.protocolVersion = kProtocolVersion;
-        g_LanDiscovery.results.push_back(result);
-        g_LanDiscovery.foundAny = true;
-        SetStatus("LAN host found");
-        CloseLanDiscoverySocket();
-        return;
+        g_LanDiscovery.fallbackCandidate.hostIp = bonjourHost;
+        g_LanDiscovery.fallbackCandidate.hostPort = bonjourPort;
+        g_LanDiscovery.fallbackCandidate.protocolVersion = kProtocolVersion;
+        g_LanDiscovery.hasFallbackCandidate = true;
+        g_LanDiscovery.fallbackReadyTick = now + kLanDiscoveryBonjourFallbackGraceMs;
+        SDL_Log("[netplay/discovery] Bonjour fallback queued host=%s port=%d grace=%llu",
+                bonjourHost, bonjourPort, (unsigned long long)kLanDiscoveryBonjourFallbackGraceMs);
     }
 
-    // All desktop and iOS guests use the same UDP discovery request. iOS
-    // still keeps Bonjour as the fast path, but UDP is required to discover a
-    // Windows host because Windows cannot publish the iOS Bonjour service.
+    // A UDP offer's source address proves that the peer is reachable on this
+    // broadcast LAN. Prefer it over a Bonjour address, which may point at the
+    // same Apple device through the higher-latency AWDL interface.
     if (now >= g_LanDiscovery.nextBroadcastTick && now < g_LanDiscovery.deadlineTick)
     {
         const int destinations = SendLanDiscoveryBroadcasts();
@@ -323,15 +326,41 @@ void TickLanDiscoveryInternal()
             result.hostIp = hostIp;
             result.hostPort = hostPort;
             result.protocolVersion = protocol;
-            g_LanDiscovery.results.push_back(result);
-            g_LanDiscovery.foundAny = true;
-            SetStatus("LAN host found");
-            SDL_Log("[netplay/discovery] found host=%s port=%d", hostIp.c_str(), hostPort);
+            if (IsIpv4LinkLocalAddress(hostIp))
+            {
+                // AWDL can also carry the UDP discovery broadcast. Do not let
+                // its first response beat a normal Wi-Fi address to the queue.
+                if (!g_LanDiscovery.hasFallbackCandidate)
+                {
+                    g_LanDiscovery.fallbackCandidate = result;
+                    g_LanDiscovery.hasFallbackCandidate = true;
+                    g_LanDiscovery.fallbackReadyTick = now + kLanDiscoveryBonjourFallbackGraceMs;
+                }
+                SDL_Log("[netplay/discovery] link-local UDP fallback queued host=%s port=%d",
+                        hostIp.c_str(), hostPort);
+            }
+            else
+            {
+                g_LanDiscovery.results.push_back(result);
+                g_LanDiscovery.foundAny = true;
+                SetStatus("LAN host found");
+                SDL_Log("[netplay/discovery] found preferred host=%s port=%d", hostIp.c_str(), hostPort);
+            }
         }
     }
 
     if (g_LanDiscovery.foundAny)
     {
+        CloseLanDiscoverySocket();
+    }
+    else if (g_LanDiscovery.hasFallbackCandidate &&
+             (now >= g_LanDiscovery.fallbackReadyTick || now >= g_LanDiscovery.deadlineTick))
+    {
+        SDL_Log("[netplay/discovery] using fallback endpoint host=%s port=%d",
+                g_LanDiscovery.fallbackCandidate.hostIp.c_str(), g_LanDiscovery.fallbackCandidate.hostPort);
+        g_LanDiscovery.results.push_back(g_LanDiscovery.fallbackCandidate);
+        g_LanDiscovery.foundAny = true;
+        SetStatus("LAN host found");
         CloseLanDiscoverySocket();
     }
     else if (now >= g_LanDiscovery.deadlineTick)
@@ -1459,6 +1488,9 @@ bool StartLanDiscovery(int hostPort, std::string *errorMessage)
     g_LanDiscovery.foundAny = false;
     g_LanDiscovery.permissionReady = false;
     g_LanDiscovery.permissionFallbackLogged = false;
+    g_LanDiscovery.hasFallbackCandidate = false;
+    g_LanDiscovery.fallbackReadyTick = 0;
+    g_LanDiscovery.fallbackCandidate = {};
     g_LanDiscovery.active = true;
     SetStatus("searching LAN...");
     TickLanDiscoveryInternal();
@@ -1471,6 +1503,9 @@ void CancelLanDiscovery()
 {
     CloseLanDiscoverySocket();
     g_LanDiscovery.results.clear();
+    g_LanDiscovery.hasFallbackCandidate = false;
+    g_LanDiscovery.fallbackReadyTick = 0;
+    g_LanDiscovery.fallbackCandidate = {};
 }
 
 bool IsLanDiscoveryActive()

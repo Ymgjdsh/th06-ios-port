@@ -186,7 +186,15 @@ static TH06BonjourHostPublisherDelegate *g_TH06BonjourHostDelegate = nil;
             const uint32_t hostAddress = ntohl(address4->sin_addr.s_addr);
             if (hostAddress == INADDR_ANY)
                 continue;
-            rank = (hostAddress & 0xff000000u) == 0x7f000000u ? 30 : 0;
+            const bool isLoopback = (hostAddress & 0xff000000u) == 0x7f000000u;
+            const bool isLinkLocal = (hostAddress & 0xffff0000u) == 0xa9fe0000u;
+            const bool isPrivate = (hostAddress & 0xff000000u) == 0x0a000000u ||
+                                   (hostAddress & 0xfff00000u) == 0xac100000u ||
+                                   (hostAddress & 0xffff0000u) == 0xc0a80000u;
+            // Bonjour may resolve the same peer on both Wi-Fi and Apple's
+            // AWDL link (169.254/16). AWDL duty cycling can add roughly 100 ms
+            // of latency, so prefer the real private LAN address when present.
+            rank = isLoopback ? 50 : (isPrivate ? 0 : (isLinkLocal ? 30 : 8));
         }
         else if (address->sa_family == AF_INET6 && [addressData length] >= sizeof(sockaddr_in6))
         {
@@ -196,8 +204,9 @@ static TH06BonjourHostPublisherDelegate *g_TH06BonjourHostDelegate = nil;
             if (inet_ntop(AF_INET6, &address6->sin6_addr, addressText, sizeof(addressText)) == NULL)
                 continue;
             familyText = "IPv6";
-            rank = IN6_IS_ADDR_LOOPBACK(&address6->sin6_addr) ? 40
-                   : (IN6_IS_ADDR_LINKLOCAL(&address6->sin6_addr) ? 20 : 10);
+            const bool isUniqueLocal = (address6->sin6_addr.s6_addr[0] & 0xfe) == 0xfc;
+            rank = IN6_IS_ADDR_LOOPBACK(&address6->sin6_addr) ? 50
+                   : (isUniqueLocal ? 5 : (IN6_IS_ADDR_LINKLOCAL(&address6->sin6_addr) ? 30 : 10));
             if (address6->sin6_scope_id != 0)
             {
                 const size_t used = std::strlen(addressText);
@@ -232,7 +241,7 @@ static TH06BonjourHostPublisherDelegate *g_TH06BonjourHostDelegate = nil;
     }
 
     NSString *resolvedName = [service hostName];
-    if ((selectedHost == nil || selectedRank >= 30) && [resolvedName length] > 0)
+    if ((selectedHost == nil || selectedRank >= 50) && [resolvedName length] > 0)
     {
         [selectedHost release];
         selectedHost = [resolvedName copy];

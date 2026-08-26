@@ -26,6 +26,7 @@ def main() -> int:
 
     cmake = read("CMakeLists.txt")
     build = read("ios/build_ios.sh")
+    remote_build = read("ios/build_on_mac.ps1")
     plist = read("ios/Info.plist.in")
     session = read("src/NetplaySession.cpp")
     session_header = read("src/NetplaySession.hpp")
@@ -59,10 +60,13 @@ def main() -> int:
     main_source = read("src/main.cpp")
 
     markers = (
-        ("iOS version", cmake, 'TH06_IOS_VERSION "1.3.2"'),
-        ("iOS build", cmake, 'TH06_IOS_BUILD "25"'),
-        ("build script version", build, "IOS_VERSION=${IOS_VERSION:-1.3.2}"),
-        ("build script build", build, "IOS_BUILD=${IOS_BUILD:-25}"),
+        ("iOS version", cmake, 'TH06_IOS_VERSION "1.3.3"'),
+        ("iOS build", cmake, 'TH06_IOS_BUILD "26"'),
+        ("build script version", build, "IOS_VERSION=${IOS_VERSION:-1.3.3}"),
+        ("build script build", build, "IOS_BUILD=${IOS_BUILD:-26}"),
+        ("Windows desktop IPA delivery", remote_build, "Copying verified IPA to the Windows desktop"),
+        ("Windows desktop IPA hash", remote_build, "Get-FileHash -Algorithm SHA256"),
+        ("cross-machine IPA hash check", remote_build, "IPA hash mismatch between Mac and Windows desktops"),
         ("stable lockstep default", cmake,
          'TH06_ENABLE_PREDICTION_ROLLBACK "编译预测回滚联机代码" OFF'),
         ("stable lockstep iOS build", build, "-DTH06_ENABLE_PREDICTION_ROLLBACK=OFF"),
@@ -83,6 +87,7 @@ def main() -> int:
         ("Bonjour IPv6 discovery", permission_probe, "AF_INET6"),
         ("Bonjour scoped IPv6 discovery", permission_probe, "if_indextoname"),
         ("Bonjour hostname fallback", permission_probe, "using hostname fallback"),
+        ("Bonjour AWDL address demotion", permission_probe, "isLinkLocal ? 30"),
         ("Bonjour publication success callback", permission_probe, "netServiceDidPublish"),
         ("Bonjour publication failure callback", permission_probe, "didNotPublish"),
         ("permission trigger diagnostic", permission_probe, "[local-network] Bonjour permission probe start"),
@@ -94,12 +99,16 @@ def main() -> int:
         ("discovery retry window", session, "kLanDiscoveryDurationMs = 10000"),
         ("discovery permission gate", session, "permissionWaitDeadlineTick"),
         ("discovery stale probe cleanup", session, "TH06_IOS_StopLocalNetworkPermissionProbe"),
+        ("LAN UDP path preference", session, "kLanDiscoveryBonjourFallbackGraceMs = 1000"),
+        ("LAN Bonjour fallback queue", session, "Bonjour fallback queued"),
+        ("LAN AWDL UDP demotion", session, "IsIpv4LinkLocalAddress(hostIp)"),
         ("directed broadcast", session, "ifa_broadaddr"),
         ("host discovery response", transport, "TH06_OFFER"),
         ("automatic join", menu, "LAN discovery auto-joined host"),
         ("search uses visible LAN host port", menu, "StartLanDiscovery(g_State.hostPort"),
         ("single visible room port", menu, "##online_room_port"),
-        ("nearby jitter buffer", menu, "constexpr int kNearbyDelay = 3;"),
+        ("LAN direct UDP delay", menu, "constexpr int kLanDelay = 2;"),
+        ("Bluetooth jitter buffer", menu, "constexpr int kBluetoothDelay = 3;"),
         ("touchable LAN search", menu, "Search & join LAN"),
         ("nearby Bluetooth menu", menu, "Bluetooth nearby"),
         ("nearby Bluetooth transport", transport, "TH06_IOS_BluetoothSend"),
