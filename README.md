@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="ios/Assets.xcassets/AppIcon.appiconset/Icon-1024.png" alt="TH06 iOS Port icon" width="180">
+</p>
+
 # TH06 iOS Port
 
 将《东方红魔乡 ～ the Embodiment of Scarlet Devil》移植到 iPhone 和 iPad 的非官方开源项目。
