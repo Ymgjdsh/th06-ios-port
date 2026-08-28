@@ -216,6 +216,9 @@ struct ResultScreen
     static ZunResult ParseCatk(ScoreDat *s, Catk *catk);
     static ZunResult ParseClrd(ScoreDat *s, Clrd *out);
     static ZunResult ParsePscr(ScoreDat *s, Pscr *out);
+    // Apply the original all-content unlock and persist it without dropping
+    // existing high scores or practice records.
+    static bool UnlockAllContent();
 
     static void WriteScore(ResultScreen *r);
     void FreeScore(i32 difficulty, i32 character);

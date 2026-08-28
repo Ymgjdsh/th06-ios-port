@@ -537,6 +537,57 @@ ZunResult ResultScreen::ParsePscr(ScoreDat *scoreDat, Pscr *outClrd)
 }
 #pragma intrinsic(memset)
 
+bool ResultScreen::UnlockAllContent()
+{
+    ResultScreen snapshot;
+    snapshot.scoreDat = ResultScreen::OpenScore((char *)"score.dat");
+    if (snapshot.scoreDat == NULL)
+    {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                     "[Cheat] all-content unlock failed: score data allocation");
+        return false;
+    }
+
+    // Rebuild the score lists before writing so the unlock operation preserves
+    // every valid high-score record already present in score.dat.
+    for (i32 difficulty = 0; difficulty < HSCR_NUM_DIFFICULTIES; difficulty++)
+    {
+        for (i32 characterShotType = 0; characterShotType < HSCR_NUM_CHARS_SHOTTYPES;
+             characterShotType++)
+        {
+            ResultScreen::GetHighScore(snapshot.scoreDat,
+                                       &snapshot.scores[difficulty][characterShotType],
+                                       characterShotType, difficulty);
+        }
+    }
+    ResultScreen::ParseCatk(snapshot.scoreDat, g_GameManager.catk);
+    ResultScreen::ParsePscr(snapshot.scoreDat, (Pscr *)g_GameManager.pscr);
+    ResultScreen::ParseClrd(snapshot.scoreDat, g_GameManager.clrd);
+
+    for (i32 characterShotType = 0; characterShotType < CLRD_NUM_CHARACTERS; characterShotType++)
+    {
+        for (i32 difficulty = 0; difficulty < 5; difficulty++)
+        {
+            g_GameManager.clrd[characterShotType].difficultyClearedWithRetries[difficulty] = 99;
+            g_GameManager.clrd[characterShotType].difficultyClearedWithoutRetries[difficulty] = 99;
+        }
+    }
+
+    ResultScreen::WriteScore(&snapshot);
+    ResultScreen::ReleaseScoreDat(snapshot.scoreDat);
+    snapshot.scoreDat = NULL;
+    for (i32 difficulty = 0; difficulty < HSCR_NUM_DIFFICULTIES; difficulty++)
+    {
+        for (i32 characterShotType = 0; characterShotType < HSCR_NUM_CHARS_SHOTTYPES;
+             characterShotType++)
+        {
+            snapshot.FreeScore(difficulty, characterShotType);
+        }
+    }
+    SDL_Log("[Cheat] all-content unlock applied and saved");
+    return true;
+}
+
 void ResultScreen::ReleaseScoreDat(ScoreDat *scoreDat)
 {
     ScoreListNode *scores;

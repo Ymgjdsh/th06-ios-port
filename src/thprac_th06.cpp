@@ -18,6 +18,7 @@
 #include <random>
 #include <string>
 #include <cstdio>
+#include <cstring>
 #include <cmath>
 
 
@@ -635,6 +636,8 @@ namespace TH06 {
     int g_lock_timer = 0;
     float g_speed_multiplier = 1.0f;  // CE-style speed: affects frame timing, not game logic
     bool g_developer_mode_enabled = false;
+    char g_cheat_code[32] = {};
+    int g_cheat_code_status = 0; // 0=idle, 1=accepted, -1=invalid
     bool g_new_touch_enabled = false;
     bool g_mouse_follow_enabled = false;
     bool g_mouse_touch_drag_enabled = false;
@@ -2346,6 +2349,29 @@ namespace TH06 {
 
     void RenderDeveloperFeaturesContent()
     {
+        ImGui::TextUnformatted(TrLocal("作弊码", "Cheat code", "チートコード"));
+        ImGui::SetNextItemWidth(220.0f);
+        const bool cheatCodeSubmitted =
+            ImGui::InputText("##th06_cheat_code", g_cheat_code, sizeof(g_cheat_code),
+                             ImGuiInputTextFlags_CharsNoBlank | ImGuiInputTextFlags_EnterReturnsTrue);
+        ImGui::SameLine();
+        if (cheatCodeSubmitted || ImGui::Button(TrLocal("应用", "Apply", "適用")))
+        {
+            g_cheat_code_status = THPracApplyCheatCode(g_cheat_code) ? 1 : -1;
+            g_cheat_code[0] = '\0';
+        }
+        if (g_cheat_code_status > 0)
+        {
+            ImGui::TextColored(ImVec4(0.35f, 1.0f, 0.45f, 1.0f), "%s",
+                               TrLocal("已解锁全部内容并保存", "All content unlocked and saved", "全コンテンツを解除して保存しました"));
+        }
+        else if (g_cheat_code_status < 0)
+        {
+            ImGui::TextColored(ImVec4(1.0f, 0.35f, 0.35f, 1.0f), "%s",
+                               TrLocal("作弊码无效", "Invalid cheat code", "無効なチートコード"));
+        }
+        ImGui::Separator();
+
         ImGui::Checkbox(DebugLogOutputLabel(), &g_adv_igi_options.th06_enable_debug_logs);
             ImGui::SameLine();
             HelpMarker(DebugLogOutputDesc());
@@ -5203,6 +5229,13 @@ namespace TH06 {
     bool THPracIsDeveloperModeEnabled()
     {
         return g_developer_mode_enabled;
+    }
+
+    bool THPracApplyCheatCode(const char *code)
+    {
+        if (code == nullptr || std::strcmp(code, "ymgjdsh") != 0)
+            return false;
+        return th06::ResultScreen::UnlockAllContent();
     }
 
     bool THPracIsNewTouchEnabled()

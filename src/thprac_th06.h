@@ -127,6 +127,9 @@ namespace TH06 {
     void THPracSetLogLevel(uint8_t level);
     void THPracApplyLogLevel();
     bool THPracIsDeveloperModeEnabled();
+    // Developer-menu cheat code. Returns true after applying and saving the
+    // original all-content unlock.
+    bool THPracApplyCheatCode(const char *code);
     bool THPracIsNewTouchEnabled();
     bool THPracIsMouseFollowEnabled();
     bool THPracIsAstroBotEnabled();
